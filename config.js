@@ -13,8 +13,11 @@ const os = require("os");
 
 const DEFAULTS = {
   name: "小螃蟹", // 称呼，用于通知标题
-  busyLabel: "吭哧吭哧 …", // 状态栏「忙碌」文本
-  idleLabel: "zᶻ  ✓ 等你", // 状态栏「等你」文本
+  busyLabel: "思考中 …", // 状态栏「思考 / 忙碌」文本（三字）
+  bashLabel: "跑命令 …", // 状态栏「执行 Bash」文本
+  readLabel: "翻找中 …", // 状态栏「读取 / 检索文件」文本
+  editLabel: "敲键盘 …", // 状态栏「编辑 / 写文件」文本
+  idleLabel: "休息中 …", // 状态栏「等你」文本（三字；zᶻ 睡眠标记画在小兽头顶,见 hud.js）
   doneTitle: "{name} · 等你了", // 通知：答完（Stop）
   doneBody: "答完了，回来看看 ✓",
   needTitle: "{name} · 需要你", // 通知：需要授权 / 等待输入（Notification）

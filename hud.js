@@ -1,7 +1,7 @@
 // cchud — Claude Code 状态栏小兽
 // 由 Claude Code 的 statusLine 通过 stdin 传入会话 JSON，输出三行带颜色的状态。
 // 跨平台：node 读取，无平台相关代码。mac/Linux 见 hud.sh，Windows 见 README。
-// 两种状态文本（忙碌 / 等你）可经配置或参数自定义，见 config.js。
+// 多种状态（思考 / 跑命令 / 翻找 / 敲键盘 / 等你）的小兽姿态与文案可配置，见 config.js。
 const CFG = require("./config").loadConfig();
 let s = "";
 process.stdin.setEncoding("utf8");
@@ -60,10 +60,18 @@ process.stdin.on("end", () => {
     return null;
   }
 
-  // ── 忙/等你:看最后一个有意义事件(不用 mtime,避免"答完瞬间日志刚写→误判忙") ──
-  function inferBusy(tp) {
-    if (process.env.HUD_FAKE_STATE) return process.env.HUD_FAKE_STATE === "busy";
-    if (!tp) return false;
+  // ── 状态推断:看最后一个有意义事件(不用 mtime,避免"答完瞬间日志刚写→误判忙") ──
+  // 细分姿态:idle 等你 / think 思考(含泛忙兜底)/ bash 跑命令 / read 翻找文件 / edit 改文件
+  const toolState = (name) => {
+    if (name === "Bash") return "bash";
+    if (/^(Read|Grep|Glob|LS|NotebookRead)$/.test(name)) return "read";
+    if (/^(Edit|Write|MultiEdit|NotebookEdit|Update)$/.test(name)) return "edit";
+    return "think"; // 其他工具(TodoWrite / Task / WebFetch…)归思考 / 工作
+  };
+  function inferState(tp) {
+    const fake = process.env.HUD_FAKE_STATE;
+    if (fake) return fake === "busy" ? "think" : fake; // 兼容旧值 busy → think
+    if (!tp) return "idle";
     try {
       const fs = require("fs");
       const ls = fs.readFileSync(tp, "utf8").split("\n").filter(Boolean);
@@ -77,14 +85,15 @@ process.stdin.on("end", () => {
         const m = o.message;
         if (!m || !m.role) continue;
         if (m.role === "assistant" && Array.isArray(m.content)) {
-          if (m.content.some((c) => c && c.type === "tool_use")) return true; // 调工具 → 忙
-          if (m.content.some((c) => c && c.type === "text" && (c.text || "").trim())) return false; // 完整回复 → 等你
-          if (m.content.some((c) => c && c.type === "thinking")) return true; // 仅思考 → 忙
+          const tus = m.content.filter((c) => c && c.type === "tool_use");
+          if (tus.length) return toolState(tus[tus.length - 1].name); // 取最后一个工具调用
+          if (m.content.some((c) => c && c.type === "text" && (c.text || "").trim())) return "idle"; // 完整回复 → 等你
+          if (m.content.some((c) => c && c.type === "thinking")) return "think"; // 仅思考 → 忙
         }
-        if (m.role === "user") return true; // 你的消息/工具结果 → 忙
+        if (m.role === "user") return "think"; // 你的消息/工具结果 → 准备干活(归思考)
       }
     } catch (e) {}
-    return false;
+    return "idle";
   }
 
   const cw = j.context_window || {};
@@ -103,17 +112,27 @@ process.stdin.on("end", () => {
   const tp = j.transcript_path,
     todos = readTodos(tp);
 
-  const busy = inferBusy(tp);
-  const lc = busy ? O : G;
-  const padW = (str, w) => {
-    const n = [...str].length;
-    return str + " ".repeat(Math.max(0, w - n));
+  const state = inferState(tp);
+  // 小兽姿态表:基底=初始「忙碌」站立形象。部位:眼=row1 的 ▛▜ 下角负空间、手=row2 两端 ▝▘、脚=row3。
+  //   每个忙态只改一处:bash 改脚(两双筷子张开跑);read 改眼(row1 眼洞瞪大 ▀▀);edit 改手(row2 两端下压敲)。
+  //   idle 用初始「休息」蜷缩形象。头顶 badge:think ?(思考,含兜底) / bash >_ / read ⌕ / edit I(输入光标) / idle zᶻ(art 右侧独立区,带间隔)。
+  const STATES = {
+    idle: { c: G, label: CFG.idleLabel, badge: "zᶻ", rows: ["  ▗▄▄▄▄▄▖", "  ▜█▆█▆█▛", "   ▔▔ ▔▔"] },
+    think: { c: O, label: CFG.busyLabel, badge: "?", rows: [" ▐▛███▜▌", "▝▜█████▛▘", "  ▘▘ ▝▝"] },
+    bash: { c: O, label: CFG.bashLabel, badge: ">_", rows: [" ▐▛███▜▌", "▝▜█████▛▘", " ▘▘   ▝▝"] },
+    read: { c: O, label: CFG.readLabel, badge: "⌕", rows: [" ▐▀███▀▌", "▝▜█████▛▘", "  ▘▘ ▝▝"] },
+    edit: { c: O, label: CFG.editLabel, badge: "I", rows: [" ▐▛███▜▌", "▗▜█████▛▖", "  ▘▘ ▝▝"] },
   };
-  // 忙:睁眼在第一行,站立;  等你:头顶实心(低头)+眼睛下移到第二行(▆眯),趴着
-  const row1 = lc + padW(busy ? " ▐▛███▜▌" : "  ▗▄▄▄▄▄▖", 10) + R; // 等你:蜷缩低头(▗▄▖底部弧,7宽盖满身体)
-  const row2 = lc + padW(busy ? "▝▜█████▛▘" : "  ▜█▆█▆█▛", 10) + R; // 等你:身也缩,眼在第二行
-  const row3 = lc + padW(busy ? "  ▘▘ ▝▝" : "   ▔▔ ▔▔", 10) + R;
-  const label = busy ? O + CFG.busyLabel + R : G + CFG.idleLabel + R; // 文本可配置，见 config.js
+  const st = STATES[state] || STATES.think;
+  const lc = st.c;
+  const ARTW = 9,
+    BADGEW = 3; // art 主体宽 + 右侧 badge 区(头顶标记 ? / zᶻ,带 1 空格间隔,不挤压头部)
+  const padW = (str, w) => str + " ".repeat(Math.max(0, w - [...str].length));
+  const bx = st.badge ? " " + st.badge : "";
+  const row1 = lc + padW(padW(st.rows[0], ARTW) + bx, ARTW + BADGEW) + R;
+  const row2 = lc + padW(st.rows[1], ARTW + BADGEW) + R;
+  const row3 = lc + padW(st.rows[2], ARTW + BADGEW) + R;
+  const label = lc + st.label + R;
 
   const sep = "  " + D + "·" + R + "  ";
   const seg = (name, p, reset) => {

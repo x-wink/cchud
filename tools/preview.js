@@ -65,8 +65,17 @@ function ansiToHtml(s) {
   return out;
 }
 
-const busy = ansiToHtml(run(busyJson, "busy"));
-const idle = ansiToHtml(run(idleJson, "idle"));
+// 依次预览各状态：思考 / 跑命令 / 翻找 / 敲键盘 / 等你
+const VARIANTS = [
+  ["think", "思考中", busyJson],
+  ["bash", "跑命令", busyJson],
+  ["read", "翻找文件", busyJson],
+  ["edit", "敲键盘", busyJson],
+  ["idle", "等你输入", idleJson],
+];
+const blocks = VARIANTS.map(
+  ([s, cap, json]) => `<span class="grp"><span class="cap"># ${cap}</span>${ansiToHtml(run(json, s))}</span>`,
+).join("");
 
 const html = `<!doctype html><html><head><meta charset="utf-8"><style>
   *{margin:0;padding:0;box-sizing:border-box}
@@ -81,7 +90,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"><style>
   .grp:first-child .cap{margin-top:0}
 </style></head><body><div class="term">
   <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span><span class="title">claude — cchud statusline</span></div>
-  <div class="body"><span class="grp"><span class="cap"># 忙碌中</span>${busy}</span><span class="grp"><span class="cap"># 等你输入</span>${idle}</span></div>
+  <div class="body">${blocks}</div>
 </div></body></html>`;
 
 fs.writeFileSync(path.join(__dirname, "preview.html"), html);
