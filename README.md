@@ -68,6 +68,12 @@ echo '{"context_window":{"used_percentage":42},"rate_limits":{"five_hour":{"used
 
 环境变量 `HUD_FAKE_STATE=busy|idle` 可强制小兽进入指定状态，方便调试。
 
+生成预览页面（README 顶部的 `preview.png` 即截自此页面的终端元素）：
+
+```sh
+node tools/preview.js   # 输出 tools/preview.html，用浏览器打开即可预览两种状态
+```
+
 ## 终端建议
 
 状态栏用到真彩色 ANSI（`38;2;r;g;b`）和 Unicode 方块字符。在 Windows Terminal、VS Code 集成终端、iTerm2 等现代终端显示最佳；老式 conhost（cmd.exe 默认窗口）可能配色或对齐不理想。
