@@ -2,6 +2,7 @@ node_modules/
 tools/preview.html
 cchud.config.json
 .cchud.json
+.claude/
 *.log
 .DS_Store
 Thumbs.db
