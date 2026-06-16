@@ -62,10 +62,10 @@ git clone https://github.com/x-wink/cchud.git
 
 `notify.js` 可在 Claude Code 需要你时弹**桌面通知 + 播提示音**，方便你挂着别的事时被叫回来。它借助 Claude Code 的两类钩子，并用不同提示音区分场景，凭声音即可分辨：
 
-| 钩子           | 触发时机                       | 提示音（Windows）      |
-| -------------- | ------------------------------ | ---------------------- |
-| `Stop`         | 答完、把控制权交还给你         | 柔和 `Asterisk`        |
-| `Notification` | 需要你授权 / 等待你输入        | 醒目 `Exclamation`     |
+| 钩子           | 触发时机                       | 提示音（Windows）              |
+| -------------- | ------------------------------ | ------------------------------ |
+| `Stop`         | 答完、把控制权交还给你         | 完成铃声 `Ring01.wav`          |
+| `Notification` | 需要你授权 / 等待你输入        | 前台提示音 `Windows Foreground.wav` |
 
 `Notification` 事件的具体事由（如「需要授权使用 Bash」）由 Claude Code 通过 stdin 的 `message` 给出，直接作通知正文。
 
