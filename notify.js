@@ -1,7 +1,12 @@
-// cchud notify — Claude Code「答完、切回等你」时提醒你。
-// 注册为 Stop 钩子：每次主对话停止（把控制权交还给你）时触发，弹桌面通知 + 播提示音。
+// cchud notify — Claude Code 需要你时提醒你（桌面通知 + 提示音）。
+// 注册为两类钩子：
+//   Stop         —— 主对话答完、把控制权交还给你（柔和音 Asterisk）。
+//   Notification —— 需要你授权 / 等待你输入（醒目音 Exclamation），具体事由在 stdin 的 message 字段。
+// 凭声音即可分辨「答完了」还是「需要你处理」。
 // 跨平台：Windows 用 PowerShell WinRT Toast + SystemSounds；macOS 用 osascript；Linux 用 notify-send。
-// 钩子会从 stdin 收到会话 JSON（含 cwd），用来在通知里标出是哪个项目。
+// 钩子会从 stdin 收到会话 JSON（含 cwd / hook_event_name / message），用来组织通知文案。
+// 称呼与文案默认为「小螃蟹」，可经配置或参数自定义，见 config.js。
+const CFG = require("./config").loadConfig();
 let s = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (d) => (s += d));
@@ -14,8 +19,22 @@ process.stdin.on("end", () => {
   const path = require("path");
   const { spawn } = require("child_process");
   const proj = j.cwd ? path.basename(j.cwd) : "";
-  const title = "气质小兽 · 等你了";
-  const body = proj ? `Claude Code 答完了 ✓  ·  ${proj}` : "Claude Code 答完了，回来看看 ✓";
+  const isNotif = j.hook_event_name === "Notification";
+
+  let title, body, winSound, macSound;
+  if (isNotif) {
+    // 需要授权 / 等待输入：message 由 Claude Code 给出（多为英文），直接作正文。
+    title = proj ? `${CFG.needTitle} · ${proj}` : CFG.needTitle;
+    body = j.message || CFG.needBody;
+    winSound = "Exclamation";
+    macSound = "Funk";
+  } else {
+    // Stop：答完了。
+    title = CFG.doneTitle;
+    body = proj ? `${CFG.doneBody}  ·  ${proj}` : CFG.doneBody;
+    winSound = "Asterisk";
+    macSound = "Glass";
+  }
 
   // detached + unref：立刻返回，不阻塞 Claude Code；通知/声音由子进程异步完成。
   const fire = (cmd, args) => {
@@ -38,14 +57,14 @@ $t=$tpl.GetElementsByTagName('text')
 $app='{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe'
 $toast=[Windows.UI.Notifications.ToastNotification]::new($tpl)
 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($app).Show($toast)
-[System.Media.SystemSounds]::Asterisk.Play()
+[System.Media.SystemSounds]::${winSound}.Play()
 Start-Sleep -Milliseconds 600
 `;
     const b64 = Buffer.from(ps, "utf16le").toString("base64");
     fire("powershell.exe", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", b64]);
   } else if (process.platform === "darwin") {
     const q = (t) => '"' + String(t).replace(/"/g, '\\"') + '"';
-    fire("osascript", ["-e", `display notification ${q(body)} with title ${q(title)} sound name "Glass"`]);
+    fire("osascript", ["-e", `display notification ${q(body)} with title ${q(title)} sound name "${macSound}"`]);
   } else {
     const shq = (t) => "'" + String(t).replace(/'/g, "'\\''") + "'";
     fire("sh", [

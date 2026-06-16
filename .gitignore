@@ -1,5 +1,7 @@
 node_modules/
 tools/preview.html
+cchud.config.json
+.cchud.json
 *.log
 .DS_Store
 Thumbs.db

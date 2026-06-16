@@ -1,6 +1,8 @@
 // cchud — Claude Code 状态栏小兽
 // 由 Claude Code 的 statusLine 通过 stdin 传入会话 JSON，输出三行带颜色的状态。
 // 跨平台：node 读取，无平台相关代码。mac/Linux 见 hud.sh，Windows 见 README。
+// 两种状态文本（忙碌 / 等你）可经配置或参数自定义，见 config.js。
+const CFG = require("./config").loadConfig();
 let s = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (d) => (s += d));
@@ -111,7 +113,7 @@ process.stdin.on("end", () => {
   const row1 = lc + padW(busy ? " ▐▛███▜▌" : "  ▗▄▄▄▄▄▖", 10) + R; // 等你:蜷缩低头(▗▄▖底部弧,7宽盖满身体)
   const row2 = lc + padW(busy ? "▝▜█████▛▘" : "  ▜█▆█▆█▛", 10) + R; // 等你:身也缩,眼在第二行
   const row3 = lc + padW(busy ? "  ▘▘ ▝▝" : "   ▔▔ ▔▔", 10) + R;
-  const label = busy ? O + "吭哧吭哧 …" + R : G + "zᶻ  ✓ 等你" + R; // zᶻ 睡觉符在小兽右侧(身体外)
+  const label = busy ? O + CFG.busyLabel + R : G + CFG.idleLabel + R; // 文本可配置，见 config.js
 
   const sep = "  " + D + "·" + R + "  ";
   const seg = (name, p, reset) => {

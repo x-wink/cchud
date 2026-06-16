@@ -1,0 +1,9 @@
+{
+  "name": "小螃蟹",
+  "busyLabel": "吭哧吭哧 …",
+  "idleLabel": "zᶻ  ✓ 等你",
+  "doneTitle": "{name} · 等你了",
+  "doneBody": "答完了，回来看看 ✓",
+  "needTitle": "{name} · 需要你",
+  "needBody": "需要你处理一下"
+}

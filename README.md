@@ -58,27 +58,59 @@ git clone https://github.com/x-wink/cchud.git
 
 保存后重启 Claude Code（或新开会话）即可生效。
 
-## 答完提醒（可选）
+## 提醒（可选）
 
-`notify.js` 可在 Claude Code「答完、把控制权交还给你」的那一刻弹**桌面通知 + 播提示音**，方便你挂着别的事时被叫回来。它借助 Claude Code 的 `Stop` 钩子（每次主对话停止时触发，正好对应小兽从「忙碌」切到「等你」）。
+`notify.js` 可在 Claude Code 需要你时弹**桌面通知 + 播提示音**，方便你挂着别的事时被叫回来。它借助 Claude Code 的两类钩子，并用不同提示音区分场景，凭声音即可分辨：
+
+| 钩子           | 触发时机                       | 提示音（Windows）      |
+| -------------- | ------------------------------ | ---------------------- |
+| `Stop`         | 答完、把控制权交还给你         | 柔和 `Asterisk`        |
+| `Notification` | 需要你授权 / 等待你输入        | 醒目 `Exclamation`     |
+
+`Notification` 事件的具体事由（如「需要授权使用 Bash」）由 Claude Code 通过 stdin 的 `message` 给出，直接作通知正文。
 
 跨平台：Windows 用 PowerShell WinRT Toast + 系统提示音，macOS 用 `osascript`，Linux 用 `notify-send` + `paplay`。
 
-在 `settings.json` 里和 `statusLine` 同级加入 `hooks`：
+在 `settings.json` 里和 `statusLine` 同级加入 `hooks`（两类指向同一个脚本，脚本内部按事件类型自动区分）：
 
 ```jsonc
 {
   "hooks": {
     "Stop": [
-      {
-        "hooks": [{ "type": "command", "command": "node \"C:\\path\\to\\cchud\\notify.js\"" }]
-      }
+      { "hooks": [{ "type": "command", "command": "node \"C:\\path\\to\\cchud\\notify.js\"" }] }
+    ],
+    "Notification": [
+      { "hooks": [{ "type": "command", "command": "node \"C:\\path\\to\\cchud\\notify.js\"" }] }
     ]
   }
 }
 ```
 
-通知里会带上当前项目目录名，多个会话同时跑时一眼能认出是哪个项目答完了。Windows 上若通知没弹出，检查「设置 → 系统 → 通知」与「专注助手 / 勿扰模式」是否屏蔽了通知（提示音不受勿扰影响，仍会响）。
+通知里会带上当前项目目录名，多个会话同时跑时一眼能认出是哪个项目在叫你。Windows 上若通知没弹出，检查「设置 → 系统 → 通知」与「专注助手 / 勿扰模式」是否屏蔽了通知（提示音不受勿扰影响，仍会响）。
+
+## 自定义称呼与文案
+
+小兽的称呼、状态栏两种状态文本、通知标题/正文都可自定义。称呼默认为 **小螃蟹**。解析优先级：**CLI 参数 > 环境变量 > 配置文件 > 默认值**。
+
+| 字段         | 默认值              | 用途                          |
+| ------------ | ------------------- | ----------------------------- |
+| `name`       | `小螃蟹`            | 称呼，用于通知标题里的 `{name}` |
+| `busyLabel`  | `吭哧吭哧 …`        | 状态栏「忙碌」文本            |
+| `idleLabel`  | `zᶻ  ✓ 等你`        | 状态栏「等你」文本            |
+| `doneTitle`  | `{name} · 等你了`   | 通知标题（答完）              |
+| `doneBody`   | `答完了，回来看看 ✓`| 通知正文（答完）              |
+| `needTitle`  | `{name} · 需要你`   | 通知标题（需要授权/等待输入） |
+| `needBody`   | `需要你处理一下`    | 通知正文兜底（Claude 未给 message 时） |
+
+**配置文件（推荐，一次配置两个脚本共用）**：把 `cchud.config.example.json` 复制为 `cchud.config.json`（脚本同目录）或 `~/.cchud.json`，按需修改。也可用 `--config <path>` 或环境变量 `CCHUD_CONFIG` 指定路径。
+
+**命令行参数**（写进 `settings.json` 的 command 里）：
+
+```jsonc
+"command": "node \"C:\\path\\to\\cchud\\hud.js\" --name 大龙虾 --idle-label \"钳子等你~\""
+```
+
+**环境变量**：`CCHUD_NAME`、`CCHUD_BUSY_LABEL`、`CCHUD_IDLE_LABEL` 等（字段名大写下划线）。
 
 ## 调试
 
