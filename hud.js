@@ -43,16 +43,41 @@ process.stdin.on("end", () => {
     try {
       const fs = require("fs");
       const path = require("path");
-      // 在单个日志文件里取最后一次 TodoWrite 的 todos
+      // 从单个日志文件还原任务列表(统一返回 [{status}…])。兼容两套机制:
+      //   新版 Task 系统:TaskCreate(按创建顺序自增 id) / TaskUpdate({taskId,status}) —— 事件流,正序重放累积状态。
+      //   老版 TodoWrite:单条 tool_use 携带完整 todos 快照 —— 取最后一次(倒序首个命中)。
+      // 优先用 Task 系统(本版本 Claude Code 默认),没有再回落 TodoWrite。
       const fromFile = (file) => {
         let ls;
         try {
-          ls = fs.readFileSync(file, "utf8").split("\n");
+          ls = fs.readFileSync(file, "utf8").split("\n").filter(Boolean);
         } catch (e) {
           return null;
         }
+        const tasks = new Map(); // id -> status
+        let seq = 0;
+        for (const line of ls) {
+          if (line.indexOf("TaskCreate") < 0 && line.indexOf("TaskUpdate") < 0) continue;
+          let o;
+          try {
+            o = JSON.parse(line);
+          } catch (e) {
+            continue;
+          }
+          const c = o.message && o.message.content;
+          if (!Array.isArray(c)) continue;
+          for (const x of c) {
+            if (!x || x.type !== "tool_use") continue;
+            if (x.name === "TaskCreate") tasks.set(String(++seq), "pending");
+            else if (x.name === "TaskUpdate" && x.input && x.input.taskId != null && x.input.status) {
+              const id = String(x.input.taskId);
+              if (tasks.has(id)) tasks.set(id, x.input.status);
+            }
+          }
+        }
+        if (tasks.size) return [...tasks.values()].map((status) => ({ status }));
         for (let i = ls.length - 1; i >= 0; i--) {
-          if (!ls[i] || ls[i].indexOf("TodoWrite") < 0) continue;
+          if (ls[i].indexOf("TodoWrite") < 0) continue;
           let o;
           try {
             o = JSON.parse(ls[i]);
