@@ -30,8 +30,8 @@ process.stdin.on("end", () => {
     macSound = "Funk";
   } else {
     // Stop：答完了。
-    title = CFG.doneTitle;
-    body = proj ? `${CFG.doneBody}  ·  ${proj}` : CFG.doneBody;
+    title = proj ? `${CFG.doneTitle} · ${proj}` : CFG.doneTitle;
+    body = CFG.doneBody;
     winWav = "Ring01.wav"; // 完成任务：铃声
     macSound = "Glass";
   }

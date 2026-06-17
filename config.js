@@ -19,10 +19,10 @@ const DEFAULTS = {
   webLabel: "搜索中 …", // 状态栏「联网搜索 / 抓取网页」文本
   editLabel: "敲键盘 …", // 状态栏「编辑 / 写文件」文本
   idleLabel: "休息中 …", // 状态栏「等你」文本（三字；zᶻ 睡眠标记画在小兽头顶,见 hud.js）
-  doneTitle: "{name} · 等你了", // 通知：答完（Stop）
-  doneBody: "答完了，回来看看 ✓",
-  needTitle: "{name} · 需要你", // 通知：需要授权 / 等待输入（Notification）
-  needBody: "需要你处理一下", // 仅当 Claude 未提供 message 时用作兜底
+  doneTitle: "{name} · 忙完啦", // 通知标题：答完（Stop），项目名由 notify.js 接在后面
+  doneBody: "主人~ 活儿干完啦，快回来看看 🦀",
+  needTitle: "{name} · 等你搭把手", // 通知标题：需要授权 / 等待输入（Notification）
+  needBody: "卡住啦，主人来搭把手~", // 仅当 Claude 未提供 message 时用作兜底
 };
 
 const FIELDS = Object.keys(DEFAULTS);
