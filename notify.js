@@ -7,6 +7,41 @@
 // 钩子会从 stdin 收到会话 JSON（含 cwd / hook_event_name / message），用来组织通知文案。
 // 称呼与文案默认为「小螃蟹」，可经配置或参数自定义，见 config.js。
 const CFG = require("./config").loadConfig();
+const fs = require("fs");
+
+// 会话名截断：自动名（ai-title）可能是一整句话，超长会撑爆 toast 标题，按字数截断加省略号。
+const NAME_MAX = 12;
+function clipName(s) {
+  s = String(s || "").trim();
+  const a = Array.from(s); // 按码点截，避免切坏中文 / emoji
+  return a.length > NAME_MAX ? a.slice(0, NAME_MAX).join("") + "…" : s;
+}
+
+// 读会话名：transcript 里有两类标题事件，倒序扫描——
+//   custom-title（customTitle）：用户 /rename 设的，优先用，扫到即返回（最新一条）。
+//   ai-title   （aiTitle）    ：Claude 自动生成的，随会话刷新；没有 custom 时回落到最新一条。
+// 都没有（如很短的会话）则返回 ""。
+function sessionName(tp) {
+  try {
+    if (!tp || !fs.existsSync(tp)) return "";
+    const lines = fs.readFileSync(tp, "utf8").split("\n");
+    let ai = "";
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].indexOf('Title"') < 0) continue; // customTitle / aiTitle
+      let o;
+      try {
+        o = JSON.parse(lines[i]);
+      } catch (e) {
+        continue;
+      }
+      if (o && o.type === "custom-title" && o.customTitle) return clipName(o.customTitle);
+      if (o && o.type === "ai-title" && o.aiTitle && !ai) ai = String(o.aiTitle);
+    }
+    return clipName(ai);
+  } catch (e) {}
+  return "";
+}
+
 let s = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (d) => (s += d));
@@ -19,18 +54,21 @@ process.stdin.on("end", () => {
   const path = require("path");
   const { spawn } = require("child_process");
   const proj = j.cwd ? path.basename(j.cwd) : "";
+  const sess = sessionName(j.transcript_path);
+  // 标题尾巴：项目名 + 会话名都显示（cchud / 会话名）；缺一个、或两者相同就只显示一个。
+  const where = proj && sess && sess !== proj ? `${proj} / ${sess}` : proj || sess;
   const isNotif = j.hook_event_name === "Notification";
 
   let title, body, winWav, macSound;
   if (isNotif) {
     // 需要授权 / 等待输入：message 由 Claude Code 给出（多为英文），直接作正文。
-    title = proj ? `${CFG.needTitle} · ${proj}` : CFG.needTitle;
+    title = where ? `${CFG.needTitle} · ${where}` : CFG.needTitle;
     body = j.message || CFG.needBody;
     winWav = "Windows Foreground.wav"; // 等待交互：前台提示音
     macSound = "Funk";
   } else {
     // Stop：答完了。
-    title = proj ? `${CFG.doneTitle} · ${proj}` : CFG.doneTitle;
+    title = where ? `${CFG.doneTitle} · ${where}` : CFG.doneTitle;
     body = CFG.doneBody;
     winWav = "Ring01.wav"; // 完成任务：铃声
     macSound = "Glass";
