@@ -62,7 +62,7 @@ process.stdin.on("end", () => {
 
   // ── 状态推断:看最后一个有意义事件(不用 mtime,避免"答完瞬间日志刚写→误判忙") ──
   // 细分姿态:idle 等你 / think 思考(含泛忙兜底)/ bash 跑命令 / read 翻找文件 / edit 改文件
-  const IDLE_AFTER_MS = 120000; // 真实用户输入悬挂超过此时长仍无 assistant 跟进 → 判 idle(秒取消/久挂的防卡死兜底)
+  const IDLE_AFTER_MS = 60000; // 真实用户输入悬挂超过此时长仍无 assistant 跟进 → 判 idle(秒取消/久挂的防卡死兜底)
   const toolState = (name) => {
     if (name === "Bash") return "bash";
     if (/^(Read|Grep|Glob|LS|NotebookRead)$/.test(name)) return "read";
