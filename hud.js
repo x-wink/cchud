@@ -89,7 +89,14 @@ process.stdin.on("end", () => {
         if (m.role === "assistant" && Array.isArray(m.content)) {
           const tus = m.content.filter((c) => c && c.type === "tool_use");
           if (tus.length) return toolState(tus[tus.length - 1].name); // 取最后一个工具调用
-          if (m.content.some((c) => c && c.type === "text" && (c.text || "").trim())) return "idle"; // 完整回复 → 等你
+          if (m.content.some((c) => c && c.type === "text" && (c.text || "").trim())) {
+            // 关键:同一轮里 assistant 的「开场白 text」与随后的 tool_use 是分开落盘的两条记录,
+            // 共享同一 stop_reason。若 stop_reason 仍是 "tool_use"(或记录尚未写完、字段缺失),
+            // 说明这轮还要继续调工具,只是 tool_use 行还没落盘 —— 此刻别把它误判成「休息」
+            // (否则长任务里会突然变绿,且 text 长时间是最后一条,refreshInterval 也校正不回来)。
+            // 只有拿到明确的收尾理由(end_turn 等)才算真的答完 → 等你。
+            return m.stop_reason && m.stop_reason !== "tool_use" ? "idle" : "think";
+          }
           if (m.content.some((c) => c && c.type === "thinking")) return "think"; // 仅思考 → 忙
         }
         if (m.role === "user") {

@@ -120,6 +120,7 @@ git clone https://github.com/x-wink/cchud.git
 
 - assistant 调 `Bash` → 跑命令 `>_`；调 `Read/Grep/Glob` 等 → 翻找中 `⌕`；调 `WebSearch/WebFetch` → 搜索中 `@`；调 `Edit/Write` 等 → 敲键盘 `I`；仅思考或调其他工具 → 思考中 `?`；给出完整文字回复 → 休息中 `zᶻ`。
 - 工具结果（`tool_result`）会被跳过、回溯到对应的工具调用判断姿态；中断标记 `[Request interrupted by user…]` 会被识别为「休息中」。
+- 同一轮里「开场白文字」与随后的工具调用是**分开落盘**的两条记录：只有 `stop_reason` 为收尾（`end_turn`）的文字才算「答完 → 休息中」；若仍是 `tool_use`（或记录尚未写完），说明后面还要继续调工具，判为忙——避免长任务里开场白先落盘、工具调用还没落盘时**误判成休息**。
 
 ### 建议开启定期刷新（`refreshInterval`）
 
