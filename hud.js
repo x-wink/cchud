@@ -62,6 +62,7 @@ process.stdin.on("end", () => {
 
   // ── 状态推断:看最后一个有意义事件(不用 mtime,避免"答完瞬间日志刚写→误判忙") ──
   // 细分姿态:idle 等你 / think 思考(含泛忙兜底)/ bash 跑命令 / read 翻找文件 / edit 改文件
+  const IDLE_AFTER_MS = 120000; // 真实用户输入悬挂超过此时长仍无 assistant 跟进 → 判 idle(秒取消/久挂的防卡死兜底)
   const toolState = (name) => {
     if (name === "Bash") return "bash";
     if (/^(Read|Grep|Glob|LS|NotebookRead)$/.test(name)) return "read";
@@ -90,7 +91,31 @@ process.stdin.on("end", () => {
           if (m.content.some((c) => c && c.type === "text" && (c.text || "").trim())) return "idle"; // 完整回复 → 等你
           if (m.content.some((c) => c && c.type === "thinking")) return "think"; // 仅思考 → 忙
         }
-        if (m.role === "user") return "think"; // 你的消息/工具结果 → 准备干活(归思考)
+        if (m.role === "user") {
+          // 中断标记:Ctrl+C 中断会写入一条 user 文本 "[Request interrupted by user...]"。
+          // 它不是完整回复,默认会被判成 think 卡住忙态;识别后回到 idle(休息)。
+          // 只看 type:"text"(或字符串)并锚定开头,避免某条 tool_result 正文碰巧含该词被误判。
+          const texts = Array.isArray(m.content)
+            ? m.content.filter((c) => c && c.type === "text").map((c) => c.text || "")
+            : typeof m.content === "string"
+              ? [m.content]
+              : [];
+          if (texts.some((t) => /^\s*\[Request interrupted by user/i.test(t))) return "idle";
+          // 工具结果回传(content 含 tool_result)紧跟在 assistant 的 tool_use 之后,
+          // 倒序扫描会先撞上它;若就此 return 会挡住前面的 tool_use,使 bash/read/edit 永远失效。
+          // 故跳过它,继续回溯到对应的 tool_use 来判定姿态。
+          const isToolResult =
+            Array.isArray(m.content) && m.content.some((c) => c && c.type === "tool_result");
+          if (isToolResult) continue;
+          // 真实用户输入:正常是在等我响应 → think。
+          // 但"提交后秒取消"会留下这条 user 记录,且 Claude Code 不对外暴露任何可识别信号
+          // (取消不触发 Stop/UserPromptSubmit,transcript 与"正在等响应"完全一致),
+          // 否则会被 refreshInterval 持续读到而永久卡在 think。兜底:这条输入落盘已超过
+          // IDLE_AFTER_MS 仍无 assistant 跟进,多半已取消或会话久挂,回 idle 防卡死(resume 也能自愈)。
+          const uts = Date.parse(o.timestamp || "");
+          if (uts && Date.now() - uts > IDLE_AFTER_MS) return "idle";
+          return "think"; // 真实用户输入(在等响应) → 思考中
+        }
       }
     } catch (e) {}
     return "idle";

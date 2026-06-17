@@ -36,7 +36,8 @@ git clone https://github.com/x-wink/cchud.git
 {
   "statusLine": {
     "type": "command",
-    "command": "/path/to/cchud/hud.sh"
+    "command": "/path/to/cchud/hud.sh",
+    "refreshInterval": 2
   }
 }
 ```
@@ -51,7 +52,8 @@ git clone https://github.com/x-wink/cchud.git
 {
   "statusLine": {
     "type": "command",
-    "command": "node \"C:\\path\\to\\cchud\\hud.js\""
+    "command": "node \"C:\\path\\to\\cchud\\hud.js\"",
+    "refreshInterval": 2
   }
 }
 ```
@@ -111,6 +113,22 @@ git clone https://github.com/x-wink/cchud.git
 ```
 
 **环境变量**：`CCHUD_NAME`、`CCHUD_BUSY_LABEL`、`CCHUD_IDLE_LABEL` 等（字段名大写下划线）。
+
+## 状态推断的原理与限制
+
+小兽的姿态全部通过**读取会话日志（transcript）的最后一个有意义事件**推断——而非看文件 mtime：
+
+- assistant 调 `Bash` → 跑命令 `>_`；调 `Read/Grep/Glob` 等 → 翻找中 `⌕`；调 `Edit/Write` 等 → 敲键盘 `I`；仅思考或调其他工具 → 思考中 `?`；给出完整文字回复 → 休息中 `zᶻ`。
+- 工具结果（`tool_result`）会被跳过、回溯到对应的工具调用判断姿态；中断标记 `[Request interrupted by user…]` 会被识别为「休息中」。
+
+### 建议开启定期刷新（`refreshInterval`）
+
+Claude Code 的状态栏默认**只在「有新助手消息」时刷新**——你**提交消息**这个动作本身不触发刷新。所以不加配置时，从你发消息到 Claude 开始响应的这段时间，状态栏会冻结在上一帧（看起来像「装睡」）。在 `statusLine` 里加上 `refreshInterval`（单位秒，最小 1）让它定期重绘即可解决（安装示例里已包含）。
+
+### 已知限制（受 Claude Code 机制约束，非脚本能完全消除）
+
+1. **短操作的姿态只会一闪而过**：assistant 消息要整条生成完才落盘，读一个文件、跑一条快命令这类毫秒级动作，对应姿态往往来不及显示。只有长任务（耗时命令、大范围检索）才会稳定停在对应姿态。
+2. **「正在等待响应」与「提交后秒取消」无法即时区分**：Claude Code 取消时既不触发任何 hook，也不在日志留下可识别痕迹，两者的日志状态完全一致。为避免秒取消后**永久**卡在「思考中」，脚本采用兜底——一条用户输入悬挂超过 **120 秒**仍无任何响应跟进，即判定为已取消 / 久挂并回到「休息中」（`claude --resume` 回来也借此自愈）。代价是秒取消后需等这段时间才回休息；阈值在 `hud.js` 的 `IDLE_AFTER_MS` 可调。
 
 ## 调试
 
