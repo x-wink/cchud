@@ -233,8 +233,9 @@ process.stdin.on("end", () => {
   if (seven != null) segs.push(seg("7d", seven, sevenR));
   const info2 = segs.join(sep);
 
+  // 仅一个任务时待办段无意义，忽略不显示（length > 1 才渲染）
   const todoSeg =
-    todos && todos.length
+    todos && todos.length > 1
       ? D + "✓" + todos.filter((t) => t && t.status === "completed").length + "/" + todos.length + R
       : "";
   const tail = [];
