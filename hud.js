@@ -65,9 +65,10 @@ process.stdin.on("end", () => {
   const IDLE_AFTER_MS = 60000; // 真实用户输入悬挂超过此时长仍无 assistant 跟进 → 判 idle(秒取消/久挂的防卡死兜底)
   const toolState = (name) => {
     if (name === "Bash") return "bash";
+    if (/^(WebSearch|WebFetch)$/.test(name)) return "web"; // 联网搜索 / 抓网页
     if (/^(Read|Grep|Glob|LS|NotebookRead)$/.test(name)) return "read";
     if (/^(Edit|Write|MultiEdit|NotebookEdit|Update)$/.test(name)) return "edit";
-    return "think"; // 其他工具(TodoWrite / Task / WebFetch…)归思考 / 工作
+    return "think"; // 其他工具(TodoWrite / Task / Skill / mcp__*…)归思考 / 工作
   };
   function inferState(tp) {
     const fake = process.env.HUD_FAKE_STATE;
@@ -146,6 +147,7 @@ process.stdin.on("end", () => {
     think: { c: O, label: CFG.busyLabel, badge: "?", rows: [" ▐▛███▜▌", "▝▜█████▛▘", "  ▘▘ ▝▝"] },
     bash: { c: O, label: CFG.bashLabel, badge: ">_", rows: [" ▐▛███▜▌", "▝▜█████▛▘", " ▘▘   ▝▝"] },
     read: { c: O, label: CFG.readLabel, badge: "⌕", rows: [" ▐▀███▀▌", "▝▜█████▛▘", "  ▘▘ ▝▝"] },
+    web: { c: O, label: CFG.webLabel, badge: "@", rows: [" ▐▀███▀▌", "▝▜█████▛▘", "  ▘▘ ▝▝"] }, // 复用 read 睁眼造型(同为"查找"),仅 badge/文案区分
     edit: { c: O, label: CFG.editLabel, badge: "I", rows: [" ▐▛███▜▌", "▗▜█████▛▖", "  ▘▘ ▝▝"] },
   };
   const st = STATES[state] || STATES.think;

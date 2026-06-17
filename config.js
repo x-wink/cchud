@@ -16,6 +16,7 @@ const DEFAULTS = {
   busyLabel: "思考中 …", // 状态栏「思考 / 忙碌」文本（三字）
   bashLabel: "跑命令 …", // 状态栏「执行 Bash」文本
   readLabel: "翻找中 …", // 状态栏「读取 / 检索文件」文本
+  webLabel: "搜索中 …", // 状态栏「联网搜索 / 抓取网页」文本
   editLabel: "敲键盘 …", // 状态栏「编辑 / 写文件」文本
   idleLabel: "休息中 …", // 状态栏「等你」文本（三字；zᶻ 睡眠标记画在小兽头顶,见 hud.js）
   doneTitle: "{name} · 等你了", // 通知：答完（Stop）

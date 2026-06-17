@@ -70,6 +70,7 @@ const VARIANTS = [
   ["think", "思考中", busyJson],
   ["bash", "跑命令", busyJson],
   ["read", "翻找文件", busyJson],
+  ["web", "联网搜索", busyJson],
   ["edit", "敲键盘", busyJson],
   ["idle", "等你输入", idleJson],
 ];
