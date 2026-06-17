@@ -42,20 +42,49 @@ process.stdin.on("end", () => {
     if (!tp) return null;
     try {
       const fs = require("fs");
-      const ls = fs.readFileSync(tp, "utf8").split("\n");
-      for (let i = ls.length - 1; i >= 0; i--) {
-        if (!ls[i] || ls[i].indexOf("TodoWrite") < 0) continue;
-        let o;
+      const path = require("path");
+      // 在单个日志文件里取最后一次 TodoWrite 的 todos
+      const fromFile = (file) => {
+        let ls;
         try {
-          o = JSON.parse(ls[i]);
+          ls = fs.readFileSync(file, "utf8").split("\n");
         } catch (e) {
-          continue;
+          return null;
         }
-        const c = o.message && o.message.content;
-        if (!Array.isArray(c)) continue;
-        const tw = c.find((x) => x && x.type === "tool_use" && x.name === "TodoWrite");
-        if (tw && tw.input && Array.isArray(tw.input.todos)) return tw.input.todos;
-      }
+        for (let i = ls.length - 1; i >= 0; i--) {
+          if (!ls[i] || ls[i].indexOf("TodoWrite") < 0) continue;
+          let o;
+          try {
+            o = JSON.parse(ls[i]);
+          } catch (e) {
+            continue;
+          }
+          const c = o.message && o.message.content;
+          if (!Array.isArray(c)) continue;
+          const tw = c.find((x) => x && x.type === "tool_use" && x.name === "TodoWrite");
+          if (tw && tw.input && Array.isArray(tw.input.todos)) return tw.input.todos;
+        }
+        return null;
+      };
+      // 子代理(Task)运行时,它的 todos 写在 <主transcript去.jsonl>/subagents/agent-*.jsonl,
+      // 主会话日志里没有;且子代理运行期间父会话日志静止 → "比主日志更新的子代理日志"即当前活动来源,
+      // 优先取它(对应 Claude Code UI 里展示的正是活动子代理的待办),否则回落主会话自己的待办。
+      const sub = tp.replace(/\.jsonl$/, "") + "/subagents";
+      let active = null,
+        mtime = 0;
+      try {
+        const mainMtime = fs.statSync(tp).mtimeMs;
+        for (const f of fs.readdirSync(sub)) {
+          if (!f.endsWith(".jsonl")) continue;
+          const fp = path.join(sub, f);
+          const mt = fs.statSync(fp).mtimeMs;
+          if (mt > mainMtime && mt > mtime) {
+            active = fp;
+            mtime = mt;
+          }
+        }
+      } catch (e) {}
+      return (active && fromFile(active)) || fromFile(tp);
     } catch (e) {}
     return null;
   }
