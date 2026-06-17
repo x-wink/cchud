@@ -85,7 +85,7 @@ const html = `<!doctype html><html><head><meta charset="utf-8"><style>
   .dot{width:12px;height:12px;border-radius:50%}
   .r{background:#ff5f57}.y{background:#febc2e}.g{background:#28c840}
   .title{color:#6c7086;font:13px -apple-system,Segoe UI,sans-serif;margin-left:10px}
-  .body{padding:18px 22px;font-family:"Consolas","Cascadia Mono","DejaVu Sans Mono","Menlo",monospace;font-size:16px;line-height:1.15;letter-spacing:0;color:#cdd6f4;white-space:pre}
+  .body{padding:18px 22px;font-family:"Consolas","Cascadia Mono","DejaVu Sans Mono","Menlo",monospace;font-size:16px;line-height:1;letter-spacing:0;color:#cdd6f4;white-space:pre}
   .cap{display:block;color:#6c7086;font:12px "Consolas",monospace;margin:14px 2px 8px;line-height:1.2}
   .grp:first-child .cap{margin-top:0}
 </style></head><body><div class="term">
