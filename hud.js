@@ -55,7 +55,13 @@ process.stdin.on("end", () => {
           return null;
         }
         const tasks = new Map(); // id -> status
-        let seq = 0;
+        // seq 全程自增,对齐系统真实 task id(#1、#2… 按创建顺序);batchStart 记录"当前计划"起始 id。
+        // 一连串 TaskCreate = 一份计划。若某次 create 紧跟在 update 之后,说明上一份计划已开始执行,
+        // 这是新计划的开头 → 把 batchStart 移到这里,最终只统计最新这份计划。
+        // (对应 Claude Code UI 只展示当前计划的待办,不累计整个会话历史的已完成任务,否则会出现 11/16 这种错值。)
+        let seq = 0,
+          batchStart = 1,
+          prevCreate = false;
         for (const line of ls) {
           if (line.indexOf("TaskCreate") < 0 && line.indexOf("TaskUpdate") < 0) continue;
           let o;
@@ -68,14 +74,21 @@ process.stdin.on("end", () => {
           if (!Array.isArray(c)) continue;
           for (const x of c) {
             if (!x || x.type !== "tool_use") continue;
-            if (x.name === "TaskCreate") tasks.set(String(++seq), "pending");
-            else if (x.name === "TaskUpdate" && x.input && x.input.taskId != null && x.input.status) {
+            if (x.name === "TaskCreate") {
+              if (!prevCreate) batchStart = seq + 1;
+              tasks.set(String(++seq), "pending");
+              prevCreate = true;
+            } else if (x.name === "TaskUpdate" && x.input && x.input.taskId != null && x.input.status) {
               const id = String(x.input.taskId);
               if (tasks.has(id)) tasks.set(id, x.input.status);
+              prevCreate = false;
             }
           }
         }
-        if (tasks.size) return [...tasks.values()].map((status) => ({ status }));
+        if (tasks.size)
+          return [...tasks.entries()]
+            .filter(([id]) => Number(id) >= batchStart)
+            .map(([, status]) => ({ status }));
         for (let i = ls.length - 1; i >= 0; i--) {
           if (ls[i].indexOf("TodoWrite") < 0) continue;
           let o;
