@@ -138,6 +138,10 @@ process.stdin.on("end", () => {
         } catch (e) {
           continue;
         }
+        // 跳过 harness 注入的元记录(isMeta:true):如重命名会话会追加一条 role:"user" 的伪记录,
+        // 正文是 "<system-reminder>The user named this session…"。它不是真实用户输入,
+        // 倒序扫描若撞上它会被判成 think,导致改完会话名后卡在「思考中」不回「等你」。
+        if (o.isMeta) continue;
         const m = o.message;
         if (!m || !m.role) continue;
         if (m.role === "assistant" && Array.isArray(m.content)) {
