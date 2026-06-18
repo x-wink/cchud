@@ -250,10 +250,15 @@ process.stdin.on("end", () => {
   if (seven != null) segs.push(seg("7d", seven, sevenR));
   const info2 = segs.join(sep);
 
-  // 仅一个任务时待办段无意义，忽略不显示（length > 1 才渲染）
+  // 待办段渲染条件:
+  //   ① length > 1：仅一个任务时无意义,忽略。
+  //   ② done < length：当前计划全部完成即视为结束,不再显示(对应 Claude Code 完成后清空待办面板),
+  //      避免一直停在 ✓5/5。多阶段自动推进时下一批 TaskCreate 会把 batchStart 推走、切到新计划,
+  //      不会误隐藏;真正全完成时才是该消失的时刻。
+  const todoDone = todos ? todos.filter((t) => t && t.status === "completed").length : 0;
   const todoSeg =
-    todos && todos.length > 1
-      ? D + "✓" + todos.filter((t) => t && t.status === "completed").length + "/" + todos.length + R
+    todos && todos.length > 1 && todoDone < todos.length
+      ? D + "✓" + todoDone + "/" + todos.length + R
       : "";
   const tail = [];
   if (model) tail.push(model);
