@@ -12,7 +12,7 @@
 
 显示内容：
 
-- **小兽姿势 + 颜色 + 头顶 badge** —— 通过读取会话日志最后一个有意义事件推断当前在干什么（思考 `?` / 跑命令 `>_` / 翻找 `⌕` / 搜索 `@` / 敲键盘 `I` / 等你 `zᶻ`），比看文件 mtime 更准。详见[状态推断的原理与限制](#状态推断的原理与限制)。
+- **小兽姿势 + 颜色 + 头顶 badge** —— 当前在干什么：思考 `?` / 跑命令 `>_` / 翻找 `⌕` / 搜索 `@` / 敲键盘 `I` / 等你 `zᶻ`，注册[实时状态源](#实时状态源hooks可选)后还有黄色的等确认 `!`。默认读会话日志的最后一个有意义事件推断（比看文件 mtime 更准，详见[状态推断的原理与限制](#状态推断的原理与限制)）；注册实时状态源后改由 hooks 即时驱动。
 - **ctx** —— 上下文窗口占用百分比。
 - **5h / 7d** —— 5 小时 / 7 天用量额度，带重置倒计时（`↻`）。
 - **进度条颜色** —— 绿(<60%) / 黄(60-85%) / 红(≥85%)。
@@ -90,6 +90,46 @@ git clone https://github.com/x-wink/cchud.git
 
 通知里会带上当前项目目录名，多个会话同时跑时一眼能认出是哪个项目在叫你。Windows 上若通知没弹出，检查「设置 → 系统 → 通知」与「专注助手 / 勿扰模式」是否屏蔽了通知（提示音不受勿扰影响，仍会响）。
 
+## 实时状态源（hooks，可选）
+
+默认的状态推断靠扫会话日志，受「落盘时机」限制——比如思考内容要整块结束才写入，思考期间状态栏拿不到任何新信息。`state.js` 提供另一条实时链路：注册为一组 Claude Code 钩子后，Claude Code 会在**事件发生的瞬间**同步调用它，它把「此刻在干嘛」写进 `~/.cchud/state/<会话id>.json`，`hud.js` 发现该文件后即优先采用（日志推断退为兜底）。收益：
+
+- **按下回车立刻进入「思考中」**——不用等任何内容落盘；
+- **工具执行前就切好姿态**——`PreToolUse` 带确切工具名，长命令全程姿态正确；
+- **新增黄色「等确认 `!`」状态**——等你授权 / 等你输入时整只小兽变黄提醒你，这是日志推断给不了的。
+
+在 `settings.json` 的 `hooks` 里把下列事件都指向 `state.js`（`Stop` / `Notification` 与 notify.js 并存，同一事件的 `hooks` 数组可以放多个命令）。全部加 `"async": true`：钩子在后台跑、完全不阻塞 Claude Code 主流程——代价是极小概率相邻事件写入乱序、状态短暂偏差，下个事件自然纠正，对状态展示这种「尽力而为」的用途是正确取舍：
+
+```jsonc
+{
+  "hooks": {
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node \"C:\\path\\to\\cchud\\state.js\"", "async": true }] }],
+    "PreToolUse":       [{ "hooks": [{ "type": "command", "command": "node \"C:\\path\\to\\cchud\\state.js\"", "async": true }] }],
+    "PostToolUse":      [{ "hooks": [{ "type": "command", "command": "node \"C:\\path\\to\\cchud\\state.js\"", "async": true }] }],
+    "SessionStart":     [{ "hooks": [{ "type": "command", "command": "node \"C:\\path\\to\\cchud\\state.js\"", "async": true }] }],
+    "SessionEnd":       [{ "hooks": [{ "type": "command", "command": "node \"C:\\path\\to\\cchud\\state.js\"", "async": true }] }],
+    "Stop": [
+      { "hooks": [
+        { "type": "command", "command": "node \"C:\\path\\to\\cchud\\notify.js\"" },
+        { "type": "command", "command": "node \"C:\\path\\to\\cchud\\state.js\"", "async": true }
+      ] }
+    ],
+    "Notification": [
+      { "hooks": [
+        { "type": "command", "command": "node \"C:\\path\\to\\cchud\\notify.js\"" },
+        { "type": "command", "command": "node \"C:\\path\\to\\cchud\\state.js\"", "async": true }
+      ] }
+    ]
+  }
+}
+```
+
+细节与兜底（实现见 `state.js` / `hud.js` 的 `resolveState`）：
+
+- 用户**中断 / 秒取消不触发任何钩子**，hook 状态会停在忙态。`hud.js` 用日志里的中断标记（比 hook 事件新即回休息）和 60 秒悬挂超时兜底，行为与纯日志推断一致。
+- 状态文件比日志旧超过 10 分钟视为**钩子失联**（如中途卸载），自动退回日志推断；超过 24 小时的陈旧状态文件会被顺手清理。
+- 状态目录可用 `stateDir` 配置（`CCHUD_STATE_DIR` / 配置文件同名字段）。
+
 ## 自定义称呼与文案
 
 小兽的称呼、状态栏两种状态文本、通知标题/正文都可自定义。称呼默认为 **小螃蟹**。解析优先级：**CLI 参数 > 环境变量 > 配置文件 > 默认值**。
@@ -99,6 +139,7 @@ git clone https://github.com/x-wink/cchud.git
 | `name`       | `小螃蟹`            | 称呼，用于通知标题里的 `{name}` |
 | `busyLabel`  | `吭哧吭哧 …`        | 状态栏「忙碌」文本            |
 | `idleLabel`  | `zᶻ  ✓ 等你`        | 状态栏「等你」文本            |
+| `waitLabel`  | `等确认 …`          | 状态栏「等授权/等输入」文本（需注册[实时状态源](#实时状态源hooks可选)） |
 | `doneTitle`  | `{name} · 等你了`   | 通知标题（答完）              |
 | `doneBody`   | `答完了，回来看看 ✓`| 通知正文（答完）              |
 | `needTitle`  | `{name} · 需要你`   | 通知标题（需要授权/等待输入） |
@@ -116,7 +157,7 @@ git clone https://github.com/x-wink/cchud.git
 
 ## 状态推断的原理与限制
 
-小兽的姿态全部通过**读取会话日志（transcript）的最后一个有意义事件**推断——而非看文件 mtime：
+未注册[实时状态源](#实时状态源hooks可选)时，小兽的姿态通过**读取会话日志（transcript）的最后一个有意义事件**推断——而非看文件 mtime：
 
 - assistant 调 `Bash` → 跑命令 `>_`；调 `Read/Grep/Glob` 等 → 翻找中 `⌕`；调 `WebSearch/WebFetch` → 搜索中 `@`；调 `Edit/Write` 等 → 敲键盘 `I`；仅思考或调其他工具 → 思考中 `?`；给出完整文字回复 → 休息中 `zᶻ`。
 - 工具结果（`tool_result`）会被跳过、回溯到对应的工具调用判断姿态；中断标记 `[Request interrupted by user…]` 会被识别为「休息中」。
@@ -139,7 +180,14 @@ Claude Code 的状态栏默认**只在「有新助手消息」时刷新**——�
 echo '{"context_window":{"used_percentage":42},"rate_limits":{"five_hour":{"used_percentage":63}},"model":{"display_name":"Opus 4.8"},"cost":{"total_cost_usd":1.23}}' | HUD_FAKE_STATE=busy node hud.js
 ```
 
-环境变量 `HUD_FAKE_STATE=busy|idle` 可强制小兽进入指定状态，方便调试。
+环境变量 `HUD_FAKE_STATE=busy|idle|bash|read|web|edit|wait` 可强制小兽进入指定状态，方便调试。
+
+模拟钩子事件验证实时状态源（`CCHUD_STATE_DIR` 可把状态文件指到临时目录）：
+
+```sh
+echo '{"hook_event_name":"PreToolUse","session_id":"test","tool_name":"Bash"}' | node state.js
+cat ~/.cchud/state/test.json   # {"state":"bash","event":"PreToolUse","tool":"Bash","ts":…}
+```
 
 生成预览页面（README 顶部的 `preview.png` 即截自此页面的终端元素）：
 

@@ -1,8 +1,10 @@
 // cchud — Claude Code 状态栏小兽
 // 由 Claude Code 的 statusLine 通过 stdin 传入会话 JSON，输出三行带颜色的状态。
 // 跨平台：node 读取，无平台相关代码。mac/Linux 见 hud.sh，Windows 见 README。
-// 多种状态（思考 / 跑命令 / 翻找 / 敲键盘 / 等你）的小兽姿态与文案可配置，见 config.js。
-const CFG = require("./config").loadConfig();
+// 多种状态（思考 / 跑命令 / 翻找 / 敲键盘 / 等确认 / 等你）的小兽姿态与文案可配置，见 config.js。
+// 状态来源两级：注册了 state.js 钩子时优先读其写入的实时状态（快且准），否则扫 transcript 推断。
+const { loadConfig, toolState } = require("./config");
+const CFG = loadConfig();
 let s = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (d) => (s += d));
@@ -16,6 +18,7 @@ process.stdin.on("end", () => {
     D = "\x1b[2m";
   const O = "\x1b[38;2;217;119;87m"; // 橙 = 忙碌
   const G = "\x1b[38;2;74;222;128m"; // 绿 = 等你
+  const Y = "\x1b[38;2;250;204;21m"; // 黄 = 等确认(需要你出面;仅 hook 状态源提供,见 state.js)
   const C = (p) => (p >= 85 ? "\x1b[91m" : p >= 60 ? "\x1b[93m" : "\x1b[92m");
   const bar = (p, w = 6) => {
     const f = Math.round((Math.max(0, Math.min(100, p)) / 100) * w);
@@ -130,13 +133,7 @@ process.stdin.on("end", () => {
   // ── 状态推断:看最后一个有意义事件(不用 mtime,避免"答完瞬间日志刚写→误判忙") ──
   // 细分姿态:idle 等你 / think 思考(含泛忙兜底)/ bash 跑命令 / read 翻找文件 / edit 改文件
   const IDLE_AFTER_MS = 60000; // 真实用户输入悬挂超过此时长仍无 assistant 跟进 → 判 idle(秒取消/久挂的防卡死兜底)
-  const toolState = (name) => {
-    if (name === "Bash") return "bash";
-    if (/^(WebSearch|WebFetch)$/.test(name)) return "web"; // 联网搜索 / 抓网页
-    if (/^(Read|Grep|Glob|LS|NotebookRead)$/.test(name)) return "read";
-    if (/^(Edit|Write|MultiEdit|NotebookEdit|Update)$/.test(name)) return "edit";
-    return "think"; // 其他工具(TodoWrite / Task / Skill / mcp__*…)归思考 / 工作
-  };
+  // 工具名 → 姿态的映射在 config.js（与 state.js 共用）
   function inferState(tp) {
     const fake = process.env.HUD_FAKE_STATE;
     if (fake) return fake === "busy" ? "think" : fake; // 兼容旧值 busy → think
@@ -200,6 +197,66 @@ process.stdin.on("end", () => {
     return "idle";
   }
 
+  // ── hook 状态源(可选,注册 state.js 后生效):事件驱动,思考等「不落盘」的状态也能即时拿到 ──
+  // 合并策略:有 hook 状态就信它,transcript 只补钩子的盲区(用户中断/秒取消都不触发任何钩子):
+  //   ① 中断会往 transcript 写 "[Request interrupted by user…]" —— 比 hook 事件更新即回 idle;
+  //   ② 秒取消毫无痕迹 —— 沿用 IDLE_AFTER_MS:提交事件悬挂超时且 transcript 也毫无动静,回 idle。
+  //   ③ transcript 明显比 hook 新(如钩子中途被卸载) → 视为 hook 已失联,整体退回 transcript 推断。
+  const HOOK_STALE_MS = 600000; // transcript 比 hook 状态新出这么多 → 判定钩子失联(10 分钟)
+  function readHookState(sid) {
+    if (!sid) return null;
+    try {
+      const fs = require("fs");
+      const path = require("path");
+      const o = JSON.parse(fs.readFileSync(path.join(CFG.stateDir, sid + ".json"), "utf8"));
+      return o && o.state && o.ts ? o : null;
+    } catch (e) {}
+    return null;
+  }
+  // hook 事件之后 transcript 里是否出现了中断标记(用户中断唯一的可观测痕迹)
+  function interruptedSince(tp, ts) {
+    if (!tp) return false;
+    try {
+      const fs = require("fs");
+      const ls = fs.readFileSync(tp, "utf8").split("\n").filter(Boolean);
+      for (let i = ls.length - 1; i >= Math.max(0, ls.length - 40); i--) {
+        let o;
+        try {
+          o = JSON.parse(ls[i]);
+        } catch (e) {
+          continue;
+        }
+        const uts = Date.parse((o && o.timestamp) || "");
+        if (uts && uts <= ts) break; // 已回溯到 hook 事件之前,不用再看
+        const m = o && o.message;
+        if (!m || m.role !== "user") continue;
+        const texts = Array.isArray(m.content)
+          ? m.content.filter((c) => c && c.type === "text").map((c) => c.text || "")
+          : typeof m.content === "string"
+            ? [m.content]
+            : [];
+        if (texts.some((t) => /^\s*\[Request interrupted by user/i.test(t))) return true;
+      }
+    } catch (e) {}
+    return false;
+  }
+  function resolveState(tp, sid) {
+    if (process.env.HUD_FAKE_STATE) return inferState(tp); // 调试直通(HUD_FAKE_STATE 在 inferState 里处理)
+    const hook = readHookState(sid);
+    if (!hook) return inferState(tp); // 没注册钩子 / 无状态文件 → 老路径
+    let mt = 0;
+    try {
+      mt = require("fs").statSync(tp).mtimeMs;
+    } catch (e) {}
+    if (mt - hook.ts > HOOK_STALE_MS) return inferState(tp); // 盲区③:hook 失联
+    if (hook.state === "idle" || hook.state === "wait") return hook.state;
+    if (interruptedSince(tp, hook.ts)) return "idle"; // 盲区①:已被中断
+    // 盲区②:提交后既无后续钩子事件、transcript 也无动静(mtime 没超过提交时刻)超 60s → 秒取消/久挂
+    if (hook.event === "UserPromptSubmit" && Date.now() - hook.ts > IDLE_AFTER_MS && mt <= hook.ts + 2000)
+      return "idle";
+    return hook.state;
+  }
+
   const cw = j.context_window || {};
   let ctx = cw.used_percentage;
   if (ctx == null && cw.context_window_size && cw.total_input_tokens != null)
@@ -216,7 +273,11 @@ process.stdin.on("end", () => {
   const tp = j.transcript_path,
     todos = readTodos(tp);
 
-  const state = inferState(tp);
+  // 会话 id:statusLine JSON 未必带 session_id,退用 transcript 文件名(即会话 id),与 state.js 同款过滤
+  const sid = String(
+    j.session_id || (tp ? require("path").basename(tp, ".jsonl") : ""),
+  ).replace(/[^\w.-]/g, "");
+  const state = resolveState(tp, sid);
   // 小兽姿态表:基底=初始「忙碌」站立形象。部位:眼=row1 的 ▛▜ 下角负空间、手=row2 两端 ▝▘、脚=row3。
   //   每个忙态只改一处:bash 改脚(两双筷子张开跑);read 改眼(row1 眼洞瞪大 ▀▀);edit 改手(row2 两端下压敲)。
   //   idle 用初始「休息」蜷缩形象。头顶 badge:think ?(思考,含兜底) / bash >_ / read ⌕ / edit I(输入光标) / idle zᶻ(art 右侧独立区,带间隔)。
@@ -227,6 +288,8 @@ process.stdin.on("end", () => {
     read: { c: O, label: CFG.readLabel, badge: "⌕", rows: [" ▐▀███▀▌", "▝▜█████▛▘", "  ▘▘ ▝▝"] },
     web: { c: O, label: CFG.webLabel, badge: "@", rows: [" ▐▀███▀▌", "▝▜█████▛▘", "  ▘▘ ▝▝"] }, // 复用 read 睁眼造型(同为"查找"),仅 badge/文案区分
     edit: { c: O, label: CFG.editLabel, badge: "I", rows: [" ▐▛███▜▌", "▗▜█████▛▖", "  ▘▘ ▝▝"] },
+    // wait 复用 think 站立造型(艺术字对齐敏感,不新造),靠黄色 + ! 徽标区分「等你授权/输入」
+    wait: { c: Y, label: CFG.waitLabel, badge: "!", rows: [" ▐▛███▜▌", "▝▜█████▛▘", "  ▘▘ ▝▝"] },
   };
   const st = STATES[state] || STATES.think;
   const lc = st.c;

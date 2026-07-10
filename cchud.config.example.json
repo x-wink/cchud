@@ -2,6 +2,7 @@
   "name": "小螃蟹",
   "busyLabel": "吭哧吭哧 …",
   "idleLabel": "zᶻ  ✓ 等你",
+  "waitLabel": "等确认 …",
   "doneTitle": "{name} · 忙完啦",
   "doneBody": "主人~ 活儿干完啦，快回来看看 🦀",
   "needTitle": "{name} · 等你搭把手",

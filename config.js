@@ -19,10 +19,12 @@ const DEFAULTS = {
   webLabel: "搜索中 …", // 状态栏「联网搜索 / 抓取网页」文本
   editLabel: "敲键盘 …", // 状态栏「编辑 / 写文件」文本
   idleLabel: "休息中 …", // 状态栏「等你」文本（三字；zᶻ 睡眠标记画在小兽头顶,见 hud.js）
+  waitLabel: "等确认 …", // 状态栏「等授权 / 等输入」文本（仅注册 hook 状态源后出现，见 state.js）
   doneTitle: "{name} · 忙完啦", // 通知标题：答完（Stop），项目名由 notify.js 接在后面
   doneBody: "主人~ 活儿干完啦，快回来看看 🦀",
   needTitle: "{name} · 等你搭把手", // 通知标题：需要授权 / 等待输入（Notification）
   needBody: "卡住啦，主人来搭把手~", // 仅当 Claude 未提供 message 时用作兜底
+  stateDir: path.join(os.homedir(), ".cchud", "state"), // hook 状态文件目录（state.js 写、hud.js 读）
 };
 
 const FIELDS = Object.keys(DEFAULTS);
@@ -84,4 +86,14 @@ function loadConfig(argv = process.argv.slice(2), env = process.env) {
   return cfg;
 }
 
-module.exports = { loadConfig, DEFAULTS };
+// 工具名 → 小兽姿态。hud.js（transcript 兜底推断）与 state.js（hook 实时记录）共用，
+// 放这里保证两条链路口径一致。
+function toolState(name) {
+  if (name === "Bash") return "bash";
+  if (/^(WebSearch|WebFetch)$/.test(name)) return "web"; // 联网搜索 / 抓网页
+  if (/^(Read|Grep|Glob|LS|NotebookRead)$/.test(name)) return "read";
+  if (/^(Edit|Write|MultiEdit|NotebookEdit|Update)$/.test(name)) return "edit";
+  return "think"; // 其他工具(TodoWrite / Task / Skill / mcp__*…)归思考 / 工作
+}
+
+module.exports = { loadConfig, DEFAULTS, toolState };
