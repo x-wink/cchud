@@ -25,6 +25,9 @@ const DEFAULTS = {
   needTitle: "{name} · 等你搭把手", // 通知标题：需要授权 / 等待输入（Notification）
   needBody: "卡住啦，主人来搭把手~", // 仅当 Claude 未提供 message 时用作兜底
   sound: true, // 通知是否带提示音；设为 false（或 off/0/no）则只弹通知不出声
+  projectName: true, // 状态栏尾行是否显示项目目录名（多会话并行时分辨"这个窗口是哪个项目"）
+  sessionId: true, // 状态栏尾行是否显示会话短 id（用来照着念 / 复制，精准指认是哪个会话）
+  sessionIdLen: 8, // 会话短 id 取前几位（默认 8 = UUID 第一段）
   stateDir: path.join(os.homedir(), ".cchud", "state"), // hook 状态文件目录（state.js 写、hud.js 读）
 };
 
@@ -84,9 +87,13 @@ function loadConfig(argv = process.argv.slice(2), env = process.env) {
   for (const k of ["doneTitle", "needTitle"]) {
     cfg[k] = String(cfg[k]).replace(/\{name\}/g, cfg.name);
   }
-  // sound 归一成布尔：文件里可写 true/false，环境变量 / CLI 是字符串，off/0/no/false 一律视为关。
-  cfg.sound =
-    typeof cfg.sound === "boolean" ? cfg.sound : !["false", "0", "off", "no", ""].includes(String(cfg.sound).trim().toLowerCase());
+  // 开关类归一成布尔：文件里可写 true/false，环境变量 / CLI 是字符串，off/0/no/false 一律视为关。
+  const toBool = (v) =>
+    typeof v === "boolean" ? v : !["false", "0", "off", "no", ""].includes(String(v).trim().toLowerCase());
+  for (const k of ["sound", "projectName", "sessionId"]) cfg[k] = toBool(cfg[k]);
+  // 长度非法（非数字 / 越界）时退回默认，避免 slice 出空串让短 id 直接消失
+  const n = parseInt(cfg.sessionIdLen, 10);
+  cfg.sessionIdLen = n >= 2 && n <= 36 ? n : DEFAULTS.sessionIdLen;
   return cfg;
 }
 

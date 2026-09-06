@@ -330,7 +330,16 @@ process.stdin.on("end", () => {
   if (model) tail.push(model);
   if (cost != null) tail.push("$" + cost.toFixed(2));
   if (dur) tail.push("⧗" + dur);
-  const info3 = [todoSeg, tail.length ? D + tail.join(" ") + R : ""].filter(Boolean).join(sep);
+  // 身份段（项目名 + 会话短 id）：用来指认「这个终端是哪个会话」，主要用途是照着念 / 复制给 Claude。
+  // 项目名优先取 workspace.project_dir——cd 进子目录时它不变，比 cwd 稳定；退回 cwd 与 notify.js 口径一致。
+  const projDir = (j.workspace || {}).project_dir || j.cwd || "";
+  const proj = projDir ? require("path").basename(projDir) : "";
+  const idBits = [];
+  if (CFG.projectName && proj) idBits.push(proj);
+  if (CFG.sessionId && sid) idBits.push("#" + sid.slice(0, CFG.sessionIdLen));
+  const info3 = [todoSeg, tail.length ? D + tail.join(" ") + R : "", idBits.length ? D + idBits.join(" ") + R : ""]
+    .filter(Boolean)
+    .join(sep);
 
   process.stdout.write(row1 + "  " + label + "\n" + row2 + "  " + info2 + "\n" + row3 + "  " + info3 + "\n");
 });
