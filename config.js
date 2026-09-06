@@ -24,6 +24,7 @@ const DEFAULTS = {
   doneBody: "主人~ 活儿干完啦，快回来看看 🦀",
   needTitle: "{name} · 等你搭把手", // 通知标题：需要授权 / 等待输入（Notification）
   needBody: "卡住啦，主人来搭把手~", // 仅当 Claude 未提供 message 时用作兜底
+  sound: true, // 通知是否带提示音；设为 false（或 off/0/no）则只弹通知不出声
   stateDir: path.join(os.homedir(), ".cchud", "state"), // hook 状态文件目录（state.js 写、hud.js 读）
 };
 
@@ -83,6 +84,9 @@ function loadConfig(argv = process.argv.slice(2), env = process.env) {
   for (const k of ["doneTitle", "needTitle"]) {
     cfg[k] = String(cfg[k]).replace(/\{name\}/g, cfg.name);
   }
+  // sound 归一成布尔：文件里可写 true/false，环境变量 / CLI 是字符串，off/0/no/false 一律视为关。
+  cfg.sound =
+    typeof cfg.sound === "boolean" ? cfg.sound : !["false", "0", "off", "no", ""].includes(String(cfg.sound).trim().toLowerCase());
   return cfg;
 }
 

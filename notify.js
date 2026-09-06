@@ -101,19 +101,19 @@ $audio.SetAttribute('silent','true')
 $app='{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe'
 $toast=[Windows.UI.Notifications.ToastNotification]::new($tpl)
 [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($app).Show($toast)
-(New-Object System.Media.SoundPlayer "$env:WINDIR\\Media\\${winWav}").PlaySync()
+${CFG.sound ? `(New-Object System.Media.SoundPlayer "$env:WINDIR\\Media\\${winWav}").PlaySync()` : ""}
 `;
     const b64 = Buffer.from(ps, "utf16le").toString("base64");
     fire("powershell.exe", ["-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-EncodedCommand", b64]);
   } else if (process.platform === "darwin") {
     const q = (t) => '"' + String(t).replace(/"/g, '\\"') + '"';
-    fire("osascript", ["-e", `display notification ${q(body)} with title ${q(title)} sound name "${macSound}"`]);
+    const macSoundClause = CFG.sound ? ` sound name "${macSound}"` : "";
+    fire("osascript", ["-e", `display notification ${q(body)} with title ${q(title)}${macSoundClause}`]);
   } else {
     const shq = (t) => "'" + String(t).replace(/'/g, "'\\''") + "'";
-    fire("sh", [
-      "-c",
-      `notify-send ${shq(title)} ${shq(body)}; ` +
-        `paplay /usr/share/sounds/freedesktop/stereo/complete.oga 2>/dev/null || true`,
-    ]);
+    const paplay = CFG.sound
+      ? `; paplay /usr/share/sounds/freedesktop/stereo/complete.oga 2>/dev/null || true`
+      : "";
+    fire("sh", ["-c", `notify-send ${shq(title)} ${shq(body)}${paplay}`]);
   }
 });
