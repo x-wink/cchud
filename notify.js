@@ -1,7 +1,7 @@
 // cchud notify — Claude Code 需要你时提醒你（桌面通知 + 提示音）。
 // 注册为两类钩子：
-//   Stop         —— 主对话答完、把控制权交还给你（完成音 Ring01.wav）。
-//   Notification —— 需要你授权 / 等待你输入（前台提示音 Windows Foreground.wav），具体事由在 stdin 的 message 字段。
+//   Stop         —— 主对话答完、把控制权交还给你（前台提示音 Windows Foreground.wav）。
+//   Notification —— 需要你授权 / 等待你输入（铃声 Ring01.wav），具体事由在 stdin 的 message 字段。
 // 凭声音即可分辨「答完了」还是「需要你处理」。
 // 跨平台：Windows 用 PowerShell WinRT Toast（静音）+ SoundPlayer 播 .wav；macOS 用 osascript；Linux 用 notify-send。
 // 钩子会从 stdin 收到会话 JSON（含 cwd / hook_event_name / message），用来组织通知文案。
@@ -64,13 +64,13 @@ process.stdin.on("end", () => {
     // 需要授权 / 等待输入：message 由 Claude Code 给出（多为英文），直接作正文。
     title = where ? `${CFG.needTitle} · ${where}` : CFG.needTitle;
     body = j.message || CFG.needBody;
-    winWav = "Windows Foreground.wav"; // 等待交互：前台提示音
+    winWav = "Ring01.wav"; // 等待交互：铃声
     macSound = "Funk";
   } else {
     // Stop：答完了。
     title = where ? `${CFG.doneTitle} · ${where}` : CFG.doneTitle;
     body = CFG.doneBody;
-    winWav = "Ring01.wav"; // 完成任务：铃声
+    winWav = "Windows Foreground.wav"; // 完成任务：前台提示音
     macSound = "Glass";
   }
 
