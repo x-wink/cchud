@@ -6,7 +6,8 @@
 // 跨平台：Windows 用 PowerShell WinRT Toast（静音）+ SoundPlayer 播 .wav；macOS 用 osascript；Linux 用 notify-send。
 // 钩子会从 stdin 收到会话 JSON（含 cwd / hook_event_name / message），用来组织通知文案。
 // 称呼与文案默认为「小螃蟹」，可经配置或参数自定义，见 config.js。
-const CFG = require("./config").loadConfig();
+const { loadConfig, notificationState } = require("./config");
+const CFG = loadConfig();
 const fs = require("fs");
 
 // 会话名截断：自动名（ai-title）可能是一整句话，超长会撑爆 toast 标题，按字数截断加省略号。
@@ -58,6 +59,10 @@ process.stdin.on("end", () => {
   // 标题尾巴：项目名 + 会话名都显示（cchud / 会话名）；缺一个、或两者相同就只显示一个。
   const where = proj && sess && sess !== proj ? `${proj} / ${sess}` : proj || sess;
   const isNotif = j.hook_event_name === "Notification";
+  // 只有「必须你操作才能往下走」的交互才值得打扰你——与状态栏 wait 同一套判定（见 config.js）。
+  // 其余 Notification 静默：idle_prompt（闲置 75 分钟提醒）不阻断流程且 Stop 时已经通知过一次，
+  // elicitation_response / auth_success 之类则是事后与杂项通知。
+  if (isNotif && notificationState(j.notification_type) !== "wait") return;
 
   let title, body, winWav, macSound;
   if (isNotif) {

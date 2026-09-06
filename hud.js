@@ -249,8 +249,11 @@ process.stdin.on("end", () => {
       mt = require("fs").statSync(tp).mtimeMs;
     } catch (e) {}
     if (mt - hook.ts > HOOK_STALE_MS) return inferState(tp); // 盲区③:hook 失联
-    if (hook.state === "idle" || hook.state === "wait") return hook.state;
-    if (interruptedSince(tp, hook.ts)) return "idle"; // 盲区①:已被中断
+    if (hook.state === "idle") return hook.state;
+    // 盲区①:已被中断。wait 也要过这关——ESC 掉授权 / 选择对话框同样不触发任何钩子,
+    // 只在 transcript 留中断标记;不查的话会一直黄着卡在「等确认」。
+    if (interruptedSince(tp, hook.ts)) return "idle";
+    if (hook.state === "wait") return hook.state;
     // 盲区②:提交后既无后续钩子事件、transcript 也无动静(mtime 没超过提交时刻)超 60s → 秒取消/久挂
     if (hook.event === "UserPromptSubmit" && Date.now() - hook.ts > IDLE_AFTER_MS && mt <= hook.ts + 2000)
       return "idle";

@@ -90,6 +90,31 @@ function loadConfig(argv = process.argv.slice(2), env = process.env) {
   return cfg;
 }
 
+// Notification 的 notification_type → 状态。state.js（状态栏显示什么）与 notify.js（要不要打扰你）
+// 共用，保证「什么才算需要你出面」只有一处定义。
+//
+// wait 的唯一含义：终端弹出了「必须你操作才能往下走」的交互（授权 / 选择 / 输入），Claude 的流程
+// 被阻断在这里。不阻断流程的通知一律不算 wait——尤其 idle_prompt，它是闲置到阈值（默认 75 分钟）
+// 后的提醒，文案就是 "Claude is waiting for your input"，恰恰是最闲的时候。
+//
+// Claude Code 2.1.261 实际会发的全部取值（从 claude.exe 里扒出来的）：
+//   permission_prompt / worker_permission_prompt  授权对话框，阻断      → wait
+//   elicitation_dialog / elicitation_url_dialog   输入对话框，阻断      → wait
+//   agent_needs_input                             代理要你输入，阻断    → wait
+//   elicitation_response / elicitation_complete   你已答复，阻断解除    → think
+//   idle_prompt                                   闲置提醒，不阻断      → idle
+//   auth_success / agent_completed /              杂项，与「谁在等谁」
+//   push_notification / computer_use_exit         无关                  → 不动状态
+function notificationState(type) {
+  const t = String(type || "");
+  // 老版本 Claude Code 没有 notification_type 字段（那时 Notification 本就只在需要用户时触发）→ 视同 wait。
+  // permission_prompt 用子串匹配以覆盖 worker_permission_prompt；elicitation 有 _dialog / _url_dialog 两种。
+  if (!t || /permission_prompt|needs_input|elicitation_(url_)?dialog/.test(t)) return "wait";
+  if (/elicitation_(response|complete)/.test(t)) return "think";
+  if (t === "idle_prompt") return "idle";
+  return null;
+}
+
 // 工具名 → 小兽姿态。hud.js（transcript 兜底推断）与 state.js（hook 实时记录）共用，
 // 放这里保证两条链路口径一致。
 function toolState(name) {
@@ -100,4 +125,4 @@ function toolState(name) {
   return "think"; // 其他工具(TodoWrite / Task / Skill / mcp__*…)归思考 / 工作
 }
 
-module.exports = { loadConfig, DEFAULTS, toolState };
+module.exports = { loadConfig, DEFAULTS, toolState, notificationState };

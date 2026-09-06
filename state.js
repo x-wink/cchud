@@ -10,7 +10,7 @@
 //   PreToolUse       → 按工具名细分 bash/web/read/edit/think（工具执行前就知道）
 //   PostToolUse      → think  工具完毕，回到思考，等下一个事件
 //   Stop             → idle   答完等你（用户中断不触发 Stop，由 hud.js 靠中断标记 + 超时兜底）
-//   Notification     → wait   等授权 / 等输入（只认「需要用户出面」的 notification_type）
+//   Notification     → 按 notification_type 分档 wait/think/idle（判定表见 config.js 的 notificationState）
 //   SessionStart     → idle   会话启动 / 恢复
 //   SessionEnd       → 删除状态文件
 //
@@ -20,7 +20,7 @@
 //（同步注册时 UserPromptSubmit 钩子的 stdout 会被注入为对话上下文）。
 const fs = require("fs");
 const path = require("path");
-const { loadConfig, toolState } = require("./config");
+const { loadConfig, toolState, notificationState } = require("./config");
 
 let s = "";
 process.stdin.setEncoding("utf8");
@@ -53,12 +53,7 @@ process.stdin.on("end", () => {
   if (ev === "UserPromptSubmit" || ev === "PostToolUse") state = "think";
   else if (ev === "PreToolUse") state = toolState(j.tool_name);
   else if (ev === "Stop" || ev === "SessionStart") state = "idle";
-  else if (ev === "Notification") {
-    // 只有「需要用户出面」的通知才切 wait；auth_success 之类的杂项通知不动状态。
-    // 老版本 Claude Code 没有 notification_type 字段（Notification 本就只在需要用户时触发）→ 视同 wait。
-    const t = String(j.notification_type || "");
-    if (!t || /permission_prompt|idle_prompt|needs_input|elicitation_dialog/.test(t)) state = "wait";
-  }
+  else if (ev === "Notification") state = notificationState(j.notification_type); // 判定表见 config.js
   if (!state) return; // 未注册语义的事件，忽略
 
   try {

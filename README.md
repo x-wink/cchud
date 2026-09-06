@@ -67,9 +67,11 @@ git clone https://github.com/x-wink/cchud.git
 | 钩子           | 触发时机                       | 提示音（Windows）              |
 | -------------- | ------------------------------ | ------------------------------ |
 | `Stop`         | 答完、把控制权交还给你         | 前台提示音 `Windows Foreground.wav` |
-| `Notification` | 需要你授权 / 等待你输入        | 铃声 `Ring01.wav`              |
+| `Notification` | **卡住了，必须你操作才能继续** | 铃声 `Ring01.wav`              |
 
 `Notification` 事件的具体事由（如「需要授权使用 Bash」）由 Claude Code 通过 stdin 的 `message` 给出，直接作通知正文。
+
+只有**真正阻断流程**的 `Notification` 才会响（授权 / 选择 / 输入对话框），判定与状态栏的「等确认」同一套口径，见[什么算「等确认」](#什么算等确认)。其余一律静默——尤其是闲置提醒 `idle_prompt`：它在会话闲置到阈值（默认 75 分钟）时发出，文案是 "Claude is waiting for your input"，但那时候会话**已经答完并通知过你一次了**，再响一次铃只会让你白跑一趟。
 
 跨平台：Windows 用 PowerShell WinRT Toast + 系统提示音，macOS 用 `osascript`，Linux 用 `notify-send` + `paplay`。
 
@@ -96,7 +98,7 @@ git clone https://github.com/x-wink/cchud.git
 
 - **按下回车立刻进入「思考中」**——不用等任何内容落盘；
 - **工具执行前就切好姿态**——`PreToolUse` 带确切工具名，长命令全程姿态正确；
-- **新增黄色「等确认 `!`」状态**——等你授权 / 等你输入时整只小兽变黄提醒你，这是日志推断给不了的。
+- **新增黄色「等确认 `!`」状态**——终端弹出必须你操作才能继续的交互（授权 / 选择 / 输入）时整只小兽变黄，这是日志推断给不了的。判定口径见[什么算「等确认」](#什么算等确认)。
 
 在 `settings.json` 的 `hooks` 里把下列事件都指向 `state.js`（`Stop` / `Notification` 与 notify.js 并存，同一事件的 `hooks` 数组可以放多个命令）。全部加 `"async": true`：钩子在后台跑、完全不阻塞 Claude Code 主流程——代价是极小概率相邻事件写入乱序、状态短暂偏差，下个事件自然纠正，对状态展示这种「尽力而为」的用途是正确取舍：
 
@@ -126,9 +128,30 @@ git clone https://github.com/x-wink/cchud.git
 
 细节与兜底（实现见 `state.js` / `hud.js` 的 `resolveState`）：
 
-- 用户**中断 / 秒取消不触发任何钩子**，hook 状态会停在忙态。`hud.js` 用日志里的中断标记（比 hook 事件新即回休息）和 60 秒悬挂超时兜底，行为与纯日志推断一致。
+- 用户**中断 / 秒取消不触发任何钩子**，hook 状态会停在忙态。`hud.js` 用日志里的中断标记（比 hook 事件新即回休息）和 60 秒悬挂超时兜底，行为与纯日志推断一致。「等确认」同样过这道检查——ESC 掉授权对话框不发钩子，不兜底就会一直黄着。
 - 状态文件比日志旧超过 10 分钟视为**钩子失联**（如中途卸载），自动退回日志推断；超过 24 小时的陈旧状态文件会被顺手清理。
 - 状态目录可用 `stateDir` 配置（`CCHUD_STATE_DIR` / 配置文件同名字段）。
+
+## 什么算「等确认」
+
+黄色的「等确认 `!`」只有一个含义：**终端弹出了必须你操作才能往下走的交互，Claude 的流程被阻断在这里**。不阻断流程的通知一律不算。
+
+Claude Code 的 `Notification` 钩子并不只在「需要你」时触发，它用 `notification_type` 区分事由。判定表（实现见 `config.js` 的 `notificationState`，`state.js` 与 `notify.js` 共用同一份，保证状态栏和提示音口径一致）：
+
+| `notification_type`                          | 含义                     | 状态     | 响铃 |
+| -------------------------------------------- | ------------------------ | -------- | ---- |
+| `permission_prompt` / `worker_permission_prompt` | 授权对话框，**阻断**     | 等确认 🟡 | ✅   |
+| `elicitation_dialog` / `elicitation_url_dialog`  | 输入对话框，**阻断**     | 等确认 🟡 | ✅   |
+| `agent_needs_input`                          | 代理要你输入，**阻断**   | 等确认 🟡 | ✅   |
+| `elicitation_response` / `elicitation_complete`  | 你已答复，阻断解除       | 思考中 🟠 | —    |
+| `idle_prompt`                                | 闲置到阈值的提醒，不阻断 | 休息中 🟢 | —    |
+| `auth_success` / `agent_completed` / `push_notification` / `computer_use_exit` | 杂项，与「谁在等谁」无关 | 不改变   | —    |
+
+老版本 Claude Code 不带 `notification_type` 字段（那时 `Notification` 本就只在需要用户时触发），缺字段时视同「等确认」。
+
+**`idle_prompt` 尤其要单独拎出来说**：它是会话闲置到阈值（`CLAUDE_CODE_IDLE_THRESHOLD_MINUTES`，默认 75 分钟）后发的提醒，文案就叫 "Claude is waiting for your input"——听起来像在等你，其实**恰恰是最闲的时候**，没有任何东西被阻断。把它算作「等确认」会让一类会话全程误报：你让 A 会话去指挥 B 会话干活，A 派完活就空等结果，闲够 75 分钟后整个等待期都停在黄色，而它本该是绿色的休息中。
+
+「等确认」的退出同样靠钩子：你答复后的 `PostToolUse` / `elicitation_response` 会把状态推走。若你直接 **ESC 掉对话框**——这不触发任何钩子——`hud.js` 用 transcript 里的中断标记兜底回「休息中」（见 `resolveState`）。
 
 ## 自定义称呼与文案
 
