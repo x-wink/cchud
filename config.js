@@ -10,6 +10,7 @@
 const fs = require("fs");
 const path = require("path");
 const os = require("os");
+const crypto = require("crypto");
 
 const DEFAULTS = {
   name: "小螃蟹", // 称呼，用于通知标题
@@ -25,10 +26,14 @@ const DEFAULTS = {
   needTitle: "{name} · 等你搭把手", // 通知标题：需要授权 / 等待输入（Notification）
   needBody: "卡住啦，主人来搭把手~", // 仅当 Claude 未提供 message 时用作兜底
   sound: true, // 通知是否带提示音；设为 false（或 off/0/no）则只弹通知不出声
-  projectName: true, // 状态栏尾行是否显示项目目录名（多会话并行时分辨"这个窗口是哪个项目"）
-  sessionId: true, // 状态栏尾行是否显示会话短 id（用来照着念 / 复制，精准指认是哪个会话）
+  sessionName: true, // 状态栏尾行 / 通知标题是否显示会话名（跨会话寻址的代号，见下方 agentInfo）
+  sessionRef: false, // 会话名后是否再跟一个 ref（[3bbce9]，同名会话消歧用；ListAgents 才带它）
+  projectName: true, // 取不到会话名时的回落：状态栏尾行显示项目目录名
+  sessionId: true, // 取不到会话名时的回落：状态栏尾行显示会话短 id
   sessionIdLen: 8, // 会话短 id 取前几位（默认 8 = UUID 第一段）
   stateDir: path.join(os.homedir(), ".cchud", "state"), // hook 状态文件目录（state.js 写、hud.js 读）
+  // Claude Code 活跃会话的登记目录（会话名与 ref 从这里读，见 agentInfo）
+  sessionsDir: path.join(process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude"), "sessions"),
 };
 
 const FIELDS = Object.keys(DEFAULTS);
@@ -90,7 +95,7 @@ function loadConfig(argv = process.argv.slice(2), env = process.env) {
   // 开关类归一成布尔：文件里可写 true/false，环境变量 / CLI 是字符串，off/0/no/false 一律视为关。
   const toBool = (v) =>
     typeof v === "boolean" ? v : !["false", "0", "off", "no", ""].includes(String(v).trim().toLowerCase());
-  for (const k of ["sound", "projectName", "sessionId"]) cfg[k] = toBool(cfg[k]);
+  for (const k of ["sound", "sessionName", "sessionRef", "projectName", "sessionId"]) cfg[k] = toBool(cfg[k]);
   // 长度非法（非数字 / 越界）时退回默认，避免 slice 出空串让短 id 直接消失
   const n = parseInt(cfg.sessionIdLen, 10);
   cfg.sessionIdLen = n >= 2 && n <= 36 ? n : DEFAULTS.sessionIdLen;
@@ -132,4 +137,49 @@ function toolState(name) {
   return "think"; // 其他工具(TodoWrite / Task / Skill / mcp__*…)归思考 / 工作
 }
 
-module.exports = { loadConfig, DEFAULTS, toolState, notificationState };
+// 名字截断：自动名 / 用户起的名可能是一整句话，撑爆 toast 标题与状态栏，按字数截断加省略号。
+function clipName(s, max = 12) {
+  s = String(s || "").trim();
+  const a = Array.from(s); // 按码点截，避免切坏中文 / emoji
+  return a.length > max ? a.slice(0, max).join("") + "…" : s;
+}
+
+// 会话身份 —— ListAgents 列出、别的会话拿来寻址的那一串 "cchud-96 [3bbce9]"，返回
+// {name, ref, derived}。
+//   name：**寻址代号**，Claude Code 里 "Message from @cchud-96" / "sent to cchud-96" 用的就是它。
+//         Claude Code 把每个活跃会话登记成 <configDir>/sessions/<pid>.json，name 字段即是。
+//         原样返回不截断——截了就没法照抄去寻址了，要截由调用方自己决定。
+//   derived：名字是否是「项目目录名 + 随机字节」自动派生的（nameSource === "derived"）。
+//         非派生名（自动标题 auto、/rename 的 user）会同时被 Claude Code 写进终端标题栏，
+//         状态栏再印一遍就是重复——所以状态栏据此决定要不要显示，见 hud.js。
+//   ref ：sha256("session:" + 该会话的 messaging socket 路径) 的十六进制前 6 位。这一步照抄
+//         claude.exe 2.1.261 的算法（Ml/rCe，Il=6），不照抄就和 ListAgents 里的 [ref] 对不上，
+//         而同名会话正是靠 ref 区分的。socket 路径缺失（旧版）时 ref 为 ""。
+// 登记文件名是进程 pid 而非会话 id，所以按 sessionId 逐个匹配——目录里只有活跃会话，条目个位数。
+// 读不到（旧版 Claude Code、目录被清、非 CLI 入口）返回 undefined，调用方各自回落。
+function agentInfo(sid, dir) {
+  if (!sid || !dir) return undefined;
+  try {
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith(".json")) continue;
+      let o;
+      try {
+        o = JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"));
+      } catch (e) {
+        continue;
+      }
+      if (!o || o.sessionId !== sid) continue;
+      const ref = o.messagingSocketPath
+        ? crypto
+            .createHash("sha256")
+            .update("session:" + o.messagingSocketPath)
+            .digest("hex")
+            .slice(0, 6)
+        : "";
+      return { name: String(o.name || ""), ref, derived: o.nameSource === "derived" };
+    }
+  } catch (e) {}
+  return undefined;
+}
+
+module.exports = { loadConfig, DEFAULTS, toolState, notificationState, agentInfo, clipName };

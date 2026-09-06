@@ -8,6 +8,8 @@
   "needTitle": "{name} · 等你搭把手",
   "needBody": "卡住啦，主人来搭把手~",
   "sound": true,
+  "sessionName": true,
+  "sessionRef": false,
   "projectName": true,
   "sessionId": true,
   "sessionIdLen": 8

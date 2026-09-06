@@ -16,7 +16,7 @@
 - **ctx** —— 上下文窗口占用百分比。
 - **5h / 7d** —— 5 小时 / 7 天用量额度，带重置倒计时（`↻`）。
 - **进度条颜色** —— 绿(<60%) / 黄(60-85%) / 红(≥85%)。
-- **尾行** —— 待办完成数（`✓3/5`）、模型名、本次花费、累计时长，末尾是**项目名 + 会话短 id**（见[多会话辨识](#多会话辨识项目名--会话短-id)）。待办兼容两套机制:新版 **Task 系统**（`TaskCreate`/`TaskUpdate` 事件流，正序重放重建任务与状态）优先，没有再回落老版 **TodoWrite** 快照。此外若有「比主日志更新的活动子代理日志」（`<主会话id>/subagents/agent-*.jsonl`），优先取它的待办，否则用主会话自己的。
+- **尾行** —— 待办完成数（`✓3/5`）、模型名、本次花费、累计时长，末尾是**会话名**（跨会话通信用的寻址代号，见[多会话辨识](#多会话辨识会话名--寻址代号)）。待办兼容两套机制:新版 **Task 系统**（`TaskCreate`/`TaskUpdate` 事件流，正序重放重建任务与状态）优先，没有再回落老版 **TodoWrite** 快照。此外若有「比主日志更新的活动子代理日志」（`<主会话id>/subagents/agent-*.jsonl`），优先取它的待办，否则用主会话自己的。
 
 ## 安装
 
@@ -90,7 +90,7 @@ git clone https://github.com/x-wink/cchud.git
 }
 ```
 
-通知里会带上当前项目目录名，多个会话同时跑时一眼能认出是哪个项目在叫你。Windows 上若通知没弹出，检查「设置 → 系统 → 通知」与「专注助手 / 勿扰模式」是否屏蔽了通知（提示音不受勿扰影响，仍会响）。
+通知标题里会带上项目名与会话名（见[多会话辨识](#多会话辨识会话名--寻址代号)），多个会话同时跑时一眼能认出是谁在叫你。Windows 上若通知没弹出，检查「设置 → 系统 → 通知」与「专注助手 / 勿扰模式」是否屏蔽了通知（提示音不受勿扰影响，仍会响）。
 
 ## 实时状态源（hooks，可选）
 
@@ -153,22 +153,27 @@ Claude Code 的 `Notification` 钩子并不只在「需要你」时触发，它�
 
 「等确认」的退出同样靠钩子：你答复后的 `PostToolUse` / `elicitation_response` 会把状态推走。若你直接 **ESC 掉对话框**——这不触发任何钩子——`hud.js` 用 transcript 里的中断标记兜底回「休息中」（见 `resolveState`）。
 
-## 多会话辨识（项目名 + 会话短 id）
+## 多会话辨识（会话名 = 寻址代号）
 
-多开会话时，尾行末尾会显示**项目目录名**与**会话短 id**：
+多开会话时，尾行末尾显示**会话名**——就是 Claude Code 里跨会话通信用的那个代号，`Message from @xwink-console-7a`、`sent to xwink-console-7a`、`ListAgents` 里的名字，都是同一串：
 
 ```
-✓3/5  ·  Opus 5 $1.23 ⧗2h  ·  xwink-console #0fb4082f
-                              ~~~~~~~~~~~~~ ~~~~~~~~~
-                                  项目名     会话短 id
+✓3/5  ·  Opus 5 $1.23 ⧗2h  ·  xwink-console-7a
+                              ~~~~~~~~~~~~~~~~
+                                  会话名
 ```
 
-- **项目名** —— 取 `workspace.project_dir` 的目录名（`cd` 进子目录时不会变，比 `cwd` 稳定），缺失时退回 `cwd`。
-- **会话短 id** —— 会话 id 的前 8 位（UUID 第一段），长度可调。
+来源是 `~/.claude/sessions/<pid>.json`（`CLAUDE_CONFIG_DIR` 生效）里的 `name`。**原样显示、不截断、不加任何前缀**——照着念能指认、复制出来就能直接给这个会话派活。
 
-用途是**指认**：多个终端同时跑时，照着念一句"看下 `xwink-console #0fb4082f`"就能和 Claude 精准对上是哪个会话，不用描述"左边那个窗口"。终端窗口本身已经把会话分开了，所以这里只需要能读出、能复制，不做额外的视觉区分。
+多会话协作时的典型用法：指挥会话要给某个终端派活，你把它状态栏上的名字念给指挥会话，它就能 `SendMessage` 过去。
 
-两段都能单独关掉，见下方配置表的 `projectName` / `sessionId` / `sessionIdLen`。
+**只显示自动派生的名字**（`xwink-console-7a` 这种「项目目录名 + 随机后缀」）。会话一旦有了自动标题或被 `/rename`，Claude Code 会把那个名字写进**终端标题栏**，状态栏再印一遍就是重复——那时尾行改回**项目名 + 会话短 id**（`xwink-console #0fb4082f`，会话 id 前 8 位 = UUID 第一段），代号照着标题栏念即可。
+
+- 读不到会话名时（旧版 Claude Code、非 CLI 入口）也走这条回落。
+- 打开 `sessionRef` 会补上 `ListAgents` 里的那截 ref：派生名后面跟 `cchud-96 [3bbce9]`，回落时则用它替掉短 id（`xwink-console [ed8eb7]`）。ref = `sha256("session:" + 该会话的 messaging socket 路径)` 的十六进制前 6 位，照抄 Claude Code 的算法算出来，同名会话靠它区分。
+- 通知 toast 里则**总是带会话名**（超过 12 字截断）：toast 不在终端里，看不到标题栏。
+
+各段都能单独关掉，见下方配置表的 `sessionName` / `sessionRef` / `projectName` / `sessionId` / `sessionIdLen`。
 
 ## 自定义称呼与文案
 
@@ -184,9 +189,12 @@ Claude Code 的 `Notification` 钩子并不只在「需要你」时触发，它�
 | `doneBody`   | `答完了，回来看看 ✓`| 通知正文（答完）              |
 | `needTitle`  | `{name} · 需要你`   | 通知标题（需要授权/等待输入） |
 | `needBody`   | `需要你处理一下`    | 通知正文兜底（Claude 未给 message 时） |
-| `projectName`| `true`              | 尾行是否显示项目目录名（见[多会话辨识](#多会话辨识项目名--会话短-id)） |
-| `sessionId`  | `true`              | 尾行是否显示会话短 id          |
+| `sessionName`| `true`              | 尾行 / 通知标题是否显示会话名（见[多会话辨识](#多会话辨识会话名--寻址代号)） |
+| `sessionRef` | `false`             | 会话名后是否再补一截 ref（`[3bbce9]`，同名会话消歧用） |
+| `projectName`| `true`              | 取不到会话名时的回落：尾行显示项目目录名 |
+| `sessionId`  | `true`              | 取不到会话名时的回落：尾行显示会话短 id |
 | `sessionIdLen`| `8`                | 会话短 id 取前几位（2–36，默认 8 = UUID 第一段） |
+| `sessionsDir`| `~/.claude/sessions`| Claude Code 活跃会话的登记目录（会话名与 ref 从这里读） |
 
 **配置文件（推荐，一次配置两个脚本共用）**：把 `cchud.config.example.json` 复制为 `cchud.config.json`（脚本同目录）或 `~/.cchud.json`，按需修改。也可用 `--config <path>` 或环境变量 `CCHUD_CONFIG` 指定路径。
 

@@ -3,7 +3,7 @@
 // 跨平台：node 读取，无平台相关代码。mac/Linux 见 hud.sh，Windows 见 README。
 // 多种状态（思考 / 跑命令 / 翻找 / 敲键盘 / 等确认 / 等你）的小兽姿态与文案可配置，见 config.js。
 // 状态来源两级：注册了 state.js 钩子时优先读其写入的实时状态（快且准），否则扫 transcript 推断。
-const { loadConfig, toolState } = require("./config");
+const { loadConfig, toolState, agentInfo } = require("./config");
 const CFG = loadConfig();
 let s = "";
 process.stdin.setEncoding("utf8");
@@ -330,13 +330,23 @@ process.stdin.on("end", () => {
   if (model) tail.push(model);
   if (cost != null) tail.push("$" + cost.toFixed(2));
   if (dur) tail.push("⧗" + dur);
-  // 身份段（项目名 + 会话短 id）：用来指认「这个终端是哪个会话」，主要用途是照着念 / 复制给 Claude。
-  // 项目名优先取 workspace.project_dir——cd 进子目录时它不变，比 cwd 稳定；退回 cwd 与 notify.js 口径一致。
+  // 身份段：会话名——多会话协作时的**寻址代号**，Claude Code 里 "Message from @cchud-96" /
+  // "sent to cchud-96" 用的就是这一串（见 config.js agentInfo）。照抄它就能指认、也能直接派活，
+  // 所以整段原样显示、不截断、不加前缀。
+  // 但只显示**派生名**（cchud-96 这种）：会话一旦有了自动标题或被 /rename，Claude Code 会把那个
+  // 名字写到终端标题栏上，状态栏再印一遍纯属重复——那时退回项目名 + 会话短 id，与读不到名字同路。
+  // 项目名取 workspace.project_dir 的目录名（cd 进子目录时不变，比 cwd 稳定），退回 cwd 与 notify.js 一致。
   const projDir = (j.workspace || {}).project_dir || j.cwd || "";
   const proj = projDir ? require("path").basename(projDir) : "";
+  const agent = (CFG.sessionName && agentInfo(sid, CFG.sessionsDir)) || {};
   const idBits = [];
-  if (CFG.projectName && proj) idBits.push(proj);
-  if (CFG.sessionId && sid) idBits.push("#" + sid.slice(0, CFG.sessionIdLen));
+  if (agent.derived && agent.name) {
+    idBits.push(agent.name + (CFG.sessionRef && agent.ref ? " [" + agent.ref + "]" : ""));
+  } else {
+    if (CFG.projectName && proj) idBits.push(proj);
+    if (CFG.sessionRef && agent.ref) idBits.push("[" + agent.ref + "]");
+    else if (CFG.sessionId && sid) idBits.push("#" + sid.slice(0, CFG.sessionIdLen));
+  }
   const info3 = [todoSeg, tail.length ? D + tail.join(" ") + R : "", idBits.length ? D + idBits.join(" ") + R : ""]
     .filter(Boolean)
     .join(sep);
