@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/pet-state", "crates/pet-hook"]
+
+# Rust 侧是 oxforge pet 桌宠的开源半边:pet-state 是状态文件契约(闭源的小兽本体经 git 依赖取它),
+# pet-hook 是 Claude Code 钩子的写方,与 state.js 同一口径、写同一个目录。Node 侧(hud.js 等)照旧
+[workspace.package]
+edition = "2024"
+license = "MIT"
+repository = "https://github.com/x-wink/cchud"
+
+[workspace.dependencies]
+pet-state = { path = "crates/pet-state", version = "0.1.0" }
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1" }

@@ -7,3 +7,6 @@ cchud.config.json
 .DS_Store
 Thumbs.db
 .playwright-mcp/
+
+# Rust 侧(pet-state / pet-hook)构建产物
+target/

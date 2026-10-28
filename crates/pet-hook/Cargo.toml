@@ -1,0 +1,11 @@
+[package]
+name = "pet-hook"
+version = "0.1.0"
+description = "Claude Code 钩子的写方:读 stdin 的 hook JSON,把「此刻在干嘛」原子写进状态目录,供 cchud 状态栏与 oxforge pet 桌宠读"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+pet-state = { workspace = true }
+serde_json = { workspace = true }

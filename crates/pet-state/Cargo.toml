@@ -1,0 +1,11 @@
+[package]
+name = "pet-state"
+version = "0.1.0"
+description = "oxforge pet 的状态文件契约:七态、Record、状态目录、原子写——钩子写方与小兽读方共用这一份"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

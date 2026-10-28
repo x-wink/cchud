@@ -1,0 +1,1 @@
+{ "session_id": "5b1c2d3e-0f4a-4b6c-8d9e-a0b1c2d3e4f5", "transcript_path": "C:\\Users\\dev\\.claude\\projects\\D--Workspace-oxforge\\5b1c2d3e-0f4a-4b6c-8d9e-a0b1c2d3e4f5.jsonl", "cwd": "D:\\Workspace\\oxforge", "permission_mode": "default", "hook_event_name": "PostToolUse", "tool_name": "Bash", "tool_response": { "stdout": "ok" } }
