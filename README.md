@@ -98,6 +98,7 @@ git clone https://github.com/x-wink/cchud.git
 [oxforge-pet 桌宠](https://oxforge.xwink.fun/pet/) 也读它。它单文件、不依赖 Node、不往 stdout 写，跑在你的权限下，所以连同契约包 `crates/pet-state` 一起开源在这里。
 
 ```sh
+brew install x-wink/tap/pet-hook                               # macOS / Linux;桌宠本体是 brew install --cask x-wink/tap/oxforge-pet
 cargo install --git https://github.com/x-wink/cchud pet-hook   # 或从 Releases 取平台二进制,改名为 pet-hook(.exe)放进 PATH
 pet-hook setup            # 把九个事件的钩子幂等写进 ~/.claude/settings.json（写前备份 .bak）
 pet-hook setup --dry-run  # 只看会改什么;--uninstall 只删自己加的;--settings <路径> 另指
