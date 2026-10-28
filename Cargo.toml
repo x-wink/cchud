@@ -12,4 +12,5 @@ repository = "https://github.com/x-wink/cchud"
 [workspace.dependencies]
 pet-state = { path = "crates/pet-state", version = "0.1.0" }
 serde = { version = "1", features = ["derive"] }
-serde_json = { version = "1" }
+# preserve_order:setup 改写用户的 settings.json 时键序原样保留,不按字母重排别人的配置
+serde_json = { version = "1", features = ["preserve_order"] }

@@ -92,6 +92,19 @@ git clone https://github.com/x-wink/cchud.git
 
 通知标题里会带上项目名与会话名（见[多会话辨识](#多会话辨识会话名--寻址代号)），多个会话同时跑时一眼能认出是谁在叫你。Windows 上若通知没弹出，检查「设置 → 系统 → 通知」与「专注助手 / 勿扰模式」是否屏蔽了通知（提示音不受勿扰影响，仍会响）。
 
+## pet-hook：Rust 版钩子写方（oxforge pet 桌宠共用）
+
+`crates/pet-hook` 是 `state.js` 的 Rust 继任：同一口径、写同一个状态目录（`~/.cchud/state`，可经 `CCHUD_STATE_DIR` 或 `~/.cchud.json` 的 `stateDir` 改），`hud.js` 照读，
+[oxforge pet 桌宠](https://github.com/x-wink/oxforge) 也读它。它单文件、不依赖 Node、不往 stdout 写，跑在你的权限下，所以连同契约包 `crates/pet-state` 一起开源在这里。
+
+```sh
+cargo install --git https://github.com/x-wink/cchud pet-hook   # 或从 Releases 取平台二进制
+pet-hook setup            # 把九个事件的钩子幂等写进 ~/.claude/settings.json（写前备份 .bak）
+pet-hook setup --dry-run  # 只看会改什么;--uninstall 只删自己加的;--settings <路径> 另指
+```
+
+`setup` 认 `CLAUDE_CONFIG_DIR`，会把旧的 `pet --hook` 注册换成自己的路径，别的钩子与键序原样保留。手工注册的等价写法见下一节，把 `state.js` 换成 `pet-hook` 的绝对路径即可。
+
 ## 实时状态源（hooks，可选）
 
 默认的状态推断靠扫会话日志，受「落盘时机」限制——比如思考内容要整块结束才写入，思考期间状态栏拿不到任何新信息。`state.js` 提供另一条实时链路：注册为一组 Claude Code 钩子后，Claude Code 会在**事件发生的瞬间**同步调用它，它把「此刻在干嘛」写进 `~/.cchud/state/<会话id>.json`，`hud.js` 发现该文件后即优先采用（日志推断退为兜底）。收益：
