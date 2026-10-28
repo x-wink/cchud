@@ -18,14 +18,51 @@
 // 有极小概率写入乱序、状态短暂偏差，下个事件自然纠正——状态展示是尽力而为，主进程绝对优先。
 // 本脚本仍只做「读 stdin → 写一个小文件」，且不往 stdout 输出任何内容
 //（同步注册时 UserPromptSubmit 钩子的 stdout 会被注入为对话上下文）。
+//
+// 本机装了 pet-hook（crates/pet-hook，本脚本的 Rust 继任，写同一个目录、同一口径）就整段委托给它：
+// 两套写方并存口径必漂移。找不到才自己写——只装 cchud 不装 pet-hook 的用户照常。
 const fs = require("fs");
 const path = require("path");
+const { spawn } = require("child_process");
 const { loadConfig, toolState, notificationState } = require("./config");
+
+/** PET_HOOK 指定 > PATH 里的 pet-hook > ~/.cargo/bin/pet-hook；都没有回 null */
+function findPetHook(env = process.env) {
+  const exe = process.platform === "win32" ? "pet-hook.exe" : "pet-hook";
+  const candidates = [];
+  if (env.PET_HOOK) candidates.push(env.PET_HOOK);
+  for (const dir of String(env.PATH || "").split(path.delimiter)) if (dir) candidates.push(path.join(dir, exe));
+  const home = env.HOME || env.USERPROFILE;
+  if (home) candidates.push(path.join(home, ".cargo", "bin", exe));
+  return candidates.find((p) => {
+    try {
+      return fs.statSync(p).isFile();
+    } catch (e) {
+      return false;
+    }
+  }) || null;
+}
 
 let s = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (d) => (s += d));
 process.stdin.on("end", () => {
+  const petHook = findPetHook();
+  if (petHook) {
+    // 起不来（权限、损坏）就退回自己写，不让状态源因此失声
+    const child = spawn(petHook, [], { stdio: ["pipe", "ignore", "ignore"] });
+    child.on("error", () => writeOwn());
+    child.on("exit", (code) => {
+      if (code !== 0) writeOwn();
+    });
+    child.stdin.on("error", () => {});
+    child.stdin.end(s);
+    return;
+  }
+  writeOwn();
+});
+
+function writeOwn() {
   let j = {};
   try {
     j = JSON.parse(s || "{}");
@@ -71,4 +108,4 @@ process.stdin.on("end", () => {
       } catch (e) {}
     }
   } catch (e) {}
-});
+}

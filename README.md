@@ -104,6 +104,7 @@ pet-hook setup --dry-run  # 只看会改什么;--uninstall 只删自己加的;--
 ```
 
 `setup` 认 `CLAUDE_CONFIG_DIR`，会把旧的 `pet --hook` 注册换成自己的路径，别的钩子与键序原样保留。手工注册的等价写法见下一节，把 `state.js` 换成 `pet-hook` 的绝对路径即可。
+已经注册着 `state.js` 的不用改：它发现本机有 `pet-hook`（`PET_HOOK` 环境变量、`PATH`、`~/.cargo/bin`）就整段委托给它，没有才自己写——两套写方只有一份口径。
 
 ## 实时状态源（hooks，可选）
 
