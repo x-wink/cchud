@@ -59,55 +59,91 @@ impl Report {
     }
 }
 
-/// settings.json 在哪:`CLAUDE_CONFIG_DIR` 优先,否则 `~/.claude/settings.json`
-pub fn default_settings_path() -> Option<PathBuf> {
-    let dir = std::env::var_os("CLAUDE_CONFIG_DIR")
+/// Claude Code 的配置目录:`CLAUDE_CONFIG_DIR`(空串不算)优先,否则 `~/.claude`。钩子找会话登记也用它
+pub fn claude_config_dir() -> Option<PathBuf> {
+    std::env::var_os("CLAUDE_CONFIG_DIR")
         .filter(|d| !d.is_empty())
         .map(PathBuf::from)
-        .or_else(|| pet_state::home_dir().map(|h| h.join(".claude")))?;
-    Some(dir.join("settings.json"))
+        .or_else(|| pet_state::home_dir().map(|h| h.join(".claude")))
 }
 
-/// 钩子命令:本程序的绝对路径,带空格就整个用双引号包起来(Claude Code 把它交给 shell)
+/// settings.json 在哪
+pub fn default_settings_path() -> Option<PathBuf> {
+    Some(claude_config_dir()?.join("settings.json"))
+}
+
+/// 钩子命令:本程序的绝对路径,按 shell 的规矩加引号(Claude Code 把它交给 shell)。
+/// Windows 上走 Git Bash,不加引号的反斜杠会被吃掉:换成正斜杠再包双引号(cmd 也认);
+/// 别处只含安全字符就原样,否则包单引号,路径里的单引号写成 `'\''`
 pub fn command_for(exe: &Path) -> String {
-    let s = exe.display().to_string();
-    if s.chars().any(char::is_whitespace) {
-        format!("\"{s}\"")
+    quote(&exe.display().to_string(), cfg!(windows))
+}
+
+fn quote(path: &str, windows: bool) -> String {
+    if windows {
+        format!("\"{}\"", path.replace('\\', "/"))
+    } else if path.chars().all(|c| c.is_ascii_alphanumeric() || "/._-+".contains(c)) {
+        path.to_string()
     } else {
-        s
+        format!("'{}'", path.replace('\'', r"'\''"))
     }
 }
 
-/// 这条钩子命令是不是我们的:本程序的路径、任何叫 pet-hook 的程序,或者旧版 `pet --hook`
+/// 命令拆成程序与其余部分:程序可以被双引号或单引号包着(路径带空格)
+fn split_program(command: &str) -> (&str, &str) {
+    let s = command.trim_start();
+    match s.chars().next() {
+        Some(q @ ('"' | '\'')) => match s[1..].find(q) {
+            Some(end) => (&s[1..1 + end], &s[2 + end..]),
+            None => (&s[1..], ""),
+        },
+        _ => {
+            let end = s.find(char::is_whitespace).unwrap_or(s.len());
+            (&s[..end], &s[end..])
+        }
+    }
+}
+
+/// 这条钩子命令是不是我们的:本程序的命令、程序叫 pet-hook 的,或者旧版 `pet --hook`。
+/// 只看程序那个词:`node /x/pet-hook` 是别人拿 node 跑的脚本,不算
 fn is_ours(command: &str, ours: &str) -> bool {
     if command == ours {
         return true;
     }
-    let trimmed = command.trim().trim_matches('"').trim_matches('\'');
-    if trimmed.ends_with(" --hook") && trimmed.trim_end_matches(" --hook").rsplit(['/', '\\']).next().is_some_and(|b| b == "pet" || b == "pet.exe") {
-        return true;
+    let (program, rest) = split_program(command);
+    match program.rsplit(['/', '\\']).next().unwrap_or(program) {
+        "pet-hook" | "pet-hook.exe" => true,
+        "pet" | "pet.exe" => rest.split_whitespace().next() == Some("--hook"),
+        _ => false,
     }
-    // 整串当一条路径看(带空格的路径被引号包着),再看第一个空白前的那段(路径后面跟了参数)
-    let whole = trimmed.rsplit(['/', '\\']).next().unwrap_or(trimmed);
-    let first = trimmed.split_whitespace().next().unwrap_or("");
-    let head = first.rsplit(['/', '\\']).next().unwrap_or(first);
-    [whole, head].into_iter().any(|b| matches!(b, "pet-hook" | "pet-hook.exe"))
-}
-
-/// 一个事件的钩子数组里,哪些条目是我们的(条目形如 `{ "hooks": [ { "type": "command", "command": … } ] }`)
-fn entry_is_ours(entry: &Value, ours: &str) -> bool {
-    entry
-        .get("hooks")
-        .and_then(Value::as_array)
-        .is_some_and(|hooks| {
-            hooks
-                .iter()
-                .any(|h| h.get("command").and_then(Value::as_str).is_some_and(|c| is_ours(c, ours)))
-        })
 }
 
 fn our_entry(ours: &str) -> Value {
     json!({ "hooks": [{ "type": "command", "command": ours, "async": true }] })
+}
+
+/// 从一个事件的条目列表里摘掉我们的钩子,返回摘了几条。只摘条目里属于我们的那几条命令:
+/// 手写的条目常把别人的钩子与旧的 `pet --hook` 放在同一个 `hooks` 数组里,整条删会连带删掉别人的;
+/// 摘空了的条目才整条去掉
+fn strip_ours(list: &mut Vec<Value>, ours: &str) -> usize {
+    let mut dropped = 0;
+    let mut emptied = Vec::with_capacity(list.len());
+    for entry in list.iter_mut() {
+        let mut now_empty = false;
+        if let Some(hooks) = entry.get_mut("hooks").and_then(Value::as_array_mut) {
+            let n = hooks.len();
+            hooks.retain(|h| !h.get("command").and_then(Value::as_str).is_some_and(|c| is_ours(c, ours)));
+            dropped += n - hooks.len();
+            now_empty = n > 0 && hooks.is_empty();
+        }
+        emptied.push(now_empty);
+    }
+    let mut i = 0;
+    list.retain(|_| {
+        i += 1;
+        !emptied[i - 1]
+    });
+    dropped
 }
 
 /// 纯函数:在一份 settings 上应用安装 / 卸载,返回改动清单。settings 不是对象就报错,不猜
@@ -121,23 +157,19 @@ pub fn apply(settings: &mut Value, ours: &str, uninstall: bool) -> Result<Report
         let Some(list) = list.as_array_mut() else {
             return Err(format!("hooks.{event} 不是数组"));
         };
-        let before = list.len();
-        let had_exact = list.iter().any(|e| {
-            e.get("hooks").and_then(Value::as_array).is_some_and(|hs| {
-                hs.iter().any(|h| h.get("command").and_then(Value::as_str) == Some(ours))
-            })
-        });
-        list.retain(|e| !entry_is_ours(e, ours));
-        let dropped = before - list.len();
+        // 算「没动」要整条一模一样:指向本程序但同步跑、带了 matcher 的旧条目也得重写,
+        // 同步钩子会卡住会话
+        let wanted = our_entry(ours);
+        let had_exact = list.contains(&wanted);
+        let dropped = strip_ours(list, ours);
         if uninstall {
             if dropped > 0 {
                 report.removed.push(event.to_string());
             }
         } else {
-            list.push(our_entry(ours));
+            list.push(wanted);
             match (dropped, had_exact) {
                 (0, _) => report.added.push(event.to_string()),
-                // 已经指向本程序、一条不多不少:算没动
                 (1, true) => {}
                 _ => report.replaced.push(event.to_string()),
             }
@@ -159,6 +191,8 @@ pub fn run(opts: &Options, exe: &Path) -> Result<Report, String> {
         .clone()
         .or_else(default_settings_path)
         .ok_or("找不到主目录,用 --settings 指定 settings.json")?;
+    // settings.json 常软链到 dotfiles 仓:原子写的 rename 会把链接本身换成普通文件,写到链接指向的真文件上
+    let path = std::fs::canonicalize(&path).unwrap_or(path);
     let original = match std::fs::read(&path) {
         Ok(bytes) => bytes,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => b"{}".to_vec(),
@@ -285,12 +319,68 @@ mod tests {
     #[test]
     fn recognises_ours_in_several_spellings() {
         assert!(is_ours(r#""C:\Program Files\pet-hook.exe""#, EXE));
+        assert!(is_ours(r#""C:/Program Files/pet-hook.exe" --x"#, EXE), "引号里的程序后面跟参数");
+        assert!(is_ours("'/a b/pet-hook'", EXE));
         assert!(is_ours("/opt/homebrew/bin/pet-hook", EXE));
         assert!(is_ours("/x/target/release/pet --hook", EXE));
+        assert!(is_ours(r#""C:\Program Files\oxforge\pet.exe" --hook"#, EXE), "带引号的旧注册");
         assert!(!is_ours("node state.js", EXE));
+        assert!(!is_ours("node /some/dir/pet-hook", EXE), "别人拿 node 跑的同名脚本");
         assert!(!is_ours("/x/pet", EXE), "小兽本体不是钩子");
-        assert_eq!(command_for(Path::new("/a b/pet-hook")), "\"/a b/pet-hook\"");
-        assert_eq!(command_for(Path::new("/a/pet-hook")), "/a/pet-hook");
+        assert!(!is_ours("/x/pet --hooks", EXE));
+    }
+
+    #[test]
+    fn commands_are_quoted_for_the_shell() {
+        assert_eq!(quote("/a/pet-hook", false), "/a/pet-hook");
+        assert_eq!(quote("/a b/pet-hook", false), "'/a b/pet-hook'");
+        assert_eq!(quote("/it's/pet-hook", false), r"'/it'\''s/pet-hook'");
+        assert_eq!(quote(r"C:\Users\dev\.cargo\bin\pet-hook.exe", true), "\"C:/Users/dev/.cargo/bin/pet-hook.exe\"");
+        for (path, win) in [("/a b/pet-hook", false), (r"C:\Program Files\pet-hook.exe", true)] {
+            assert!(is_ours(&quote(path, win), "something-else"), "{path} 加了引号还认得出");
+        }
+    }
+
+    /// 手写条目把别人的钩子与旧注册放在同一个数组里:只摘我们的那条
+    #[test]
+    fn shared_entry_keeps_the_other_hooks() {
+        let mut s = json!({ "hooks": { "Stop": [{ "hooks": [
+            { "type": "command", "command": "node notify.js" },
+            { "type": "command", "command": "/x/target/release/pet --hook" }
+        ] }] } });
+        let r = apply(&mut s, EXE, false).unwrap();
+        assert_eq!(r.replaced, ["Stop"]);
+        let stop = s["hooks"]["Stop"].as_array().unwrap();
+        assert_eq!(stop[0]["hooks"], json!([{ "type": "command", "command": "node notify.js" }]));
+        assert_eq!(stop[1], our_entry(EXE));
+        apply(&mut s, EXE, true).unwrap();
+        assert_eq!(s["hooks"]["Stop"][0]["hooks"][0]["command"], "node notify.js", "卸载也只摘自己的");
+    }
+
+    /// 指向本程序但同步跑、带 matcher 的条目要重写成异步,不能报「无需改动」
+    #[test]
+    fn exact_path_with_wrong_shape_is_rewritten() {
+        let mut s = json!({ "hooks": { "Stop": [{ "matcher": "Bash", "hooks": [{ "type": "command", "command": EXE }] }] } });
+        let r = apply(&mut s, EXE, false).unwrap();
+        assert_eq!(r.replaced, ["Stop"]);
+        assert_eq!(s["hooks"]["Stop"], json!([our_entry(EXE)]));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinked_settings_stay_a_symlink() {
+        let dir = std::env::temp_dir().join(format!("pet-hook-link-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let real = dir.join("real.json");
+        let link = dir.join("settings.json");
+        std::fs::write(&real, "{}").unwrap();
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        run(&Options { settings: Some(link.clone()), ..Options::default() }, Path::new(EXE)).unwrap();
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink(), "链接还在");
+        let written: Value = serde_json::from_slice(&std::fs::read(&real).unwrap()).unwrap();
+        assert_eq!(events_pointing_to(&written, EXE).len(), 9, "写进了链接指向的真文件");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

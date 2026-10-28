@@ -83,8 +83,14 @@ pub fn decide(input: &Value, now_ms: u64) -> Action {
 /// 说话的会话叫什么:项目目录名 + Claude Code 登记的会话名,
 /// 会话名已以项目名开头(自动派生的「项目名-数字」)就只留会话名;缺一个就只显示另一个
 pub fn title(project: &str, session: &str) -> String {
+    let session = session.trim();
+    // 先按整名判派生(截断后的名字可能比项目名还短),要求项目名后面紧跟 `-` 或到头:`ox` 不算 `oxforge-3` 的项目
+    let derived = !project.is_empty()
+        && session
+            .strip_prefix(project)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with('-'));
     let session: String = {
-        let chars: Vec<char> = session.trim().chars().collect();
+        let chars: Vec<char> = session.chars().collect();
         if chars.len() > NAME_MAX {
             chars[..NAME_MAX].iter().collect::<String>() + "…"
         } else {
@@ -94,7 +100,7 @@ pub fn title(project: &str, session: &str) -> String {
     match (project.is_empty(), session.is_empty()) {
         (_, true) => project.to_string(),
         (true, false) => session,
-        (false, false) if session.starts_with(project) => session,
+        (false, false) if derived => session,
         (false, false) => format!("{project} / {session}"),
     }
 }
@@ -111,10 +117,7 @@ fn project_of(input: &Value) -> String {
 
 /// Claude Code 把活跃会话登记成 `<配置目录>/sessions/<pid>.json`,`name` 即会话名(跨会话寻址的代号)
 fn session_name(sid: &str) -> Option<String> {
-    let config = std::env::var_os("CLAUDE_CONFIG_DIR")
-        .map(std::path::PathBuf::from)
-        .or_else(|| pet_state::home_dir().map(|h| h.join(".claude")))?;
-    std::fs::read_dir(config.join("sessions"))
+    std::fs::read_dir(crate::setup::claude_config_dir()?.join("sessions"))
         .ok()?
         .flatten()
         .find_map(|e| {
@@ -168,7 +171,7 @@ pub fn run(stdin: &str, dir: &Path, now_ms: u64) {
     let file = format!("{sid}.json");
     let path = dir.join(&file);
     // 先动调用标记再写状态文件:读方被状态文件的变化叫醒,那时标记已经是新的
-    track(&dir.join(format!("{sid}{CALLS_SUFFIX}")), &input);
+    track(&dir.join(format!("{sid}{CALLS_SUFFIX}")), &input, now_ms);
     match decide(&input, now_ms) {
         Action::Remove => {
             let _ = pet_state::remove(&path);
@@ -181,7 +184,8 @@ pub fn run(stdin: &str, dir: &Path, now_ms: u64) {
             let ok = serde_json::to_vec(&record)
                 .ok()
                 .is_some_and(|bytes| pet_state::write_atomic(&path, &bytes).is_ok());
-            if ok {
+            // 清的是放了 24 h 的东西,不必每个工具事件都扫一遍目录:一轮开始与结束时扫
+            if ok && matches!(record.event.as_str(), "Stop" | "SessionStart") {
                 gc(dir, &file, now_ms);
             }
         }
@@ -190,15 +194,17 @@ pub fn run(stdin: &str, dir: &Path, now_ms: u64) {
 }
 
 /// 并行调用的配对(D314):Pre 落标记、Post 删标记,乱序时靠墓碑对上;一批调用收齐、一轮开始或结束时整目录清掉,
-/// 被拒绝或中断而没等到 Post 的标记最多活到这一批结束
-fn track(calls: &Path, input: &Value) {
+/// 被拒绝或中断而没等到 Post 的标记最多活到这一批结束。
+/// 异步钩子会乱序:上一批迟到的 PostToolBatch 可能落在下一批的 PreToolUse 之后,所以只清比本事件早的标记
+/// (`now_ms` 是本进程起来时的钟),整目录删会把下一批正在跑的调用一并抹掉
+fn track(calls: &Path, input: &Value, now_ms: u64) {
     let str_of = |key: &str| input.get(key).and_then(Value::as_str).unwrap_or("");
     let event = str_of("hook_event_name");
     if matches!(
         event,
         "PostToolBatch" | "UserPromptSubmit" | "Stop" | "SessionStart" | "SessionEnd"
     ) {
-        let _ = std::fs::remove_dir_all(calls);
+        clear_older(calls, now_ms);
         return;
     }
     // 拼进路径,同 session_id 的过滤;老版本 Claude Code 不带它,就退回只看最后一个事件
@@ -222,6 +228,23 @@ fn track(calls: &Path, input: &Value) {
     }
 }
 
+/// 删掉调用标记目录里修改时间早于 `before_ms` 的标记,目录空了连目录一起删
+fn clear_older(calls: &Path, before_ms: u64) {
+    let Ok(entries) = std::fs::read_dir(calls) else { return };
+    for entry in entries.flatten() {
+        // 同一毫秒算早:修改时间只到毫秒,严格小于会让同一毫秒落的旧标记清不掉
+        if modified_ms(&entry).is_none_or(|m| m <= before_ms) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+    let _ = std::fs::remove_dir(calls);
+}
+
+fn modified_ms(entry: &std::fs::DirEntry) -> Option<u64> {
+    let t = entry.metadata().and_then(|m| m.modified()).ok()?;
+    Some(t.duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64)
+}
+
 /// 清掉别的会话放了 24 h 没更新的状态文件与调用标记目录,连同写到一半被杀留下的临时文件
 fn gc(dir: &Path, own: &str, now_ms: u64) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -233,13 +256,7 @@ fn gc(dir: &Path, own: &str, now_ms: u64) {
         if name == own || name == own_calls || !(name.ends_with(".json") || name.ends_with(".tmp") || calls) {
             continue;
         }
-        let modified = entry
-            .metadata()
-            .and_then(|m| m.modified())
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_millis() as u64);
-        if modified.is_some_and(|m| now_ms.saturating_sub(m) > GC_AFTER_MS) {
+        if modified_ms(&entry).is_some_and(|m| now_ms.saturating_sub(m) > GC_AFTER_MS) {
             let _ = if calls {
                 std::fs::remove_dir_all(entry.path())
             } else {
@@ -337,6 +354,8 @@ mod tests {
         assert_eq!(title("oxforge", "动效升级"), "oxforge / 动效升级");
         assert_eq!(title("oxforge", ""), "oxforge");
         assert_eq!(title("", "名字"), "名字");
+        assert_eq!(title("xwink-console", "xwink-console-7a"), "xwink-consol…", "长项目名的派生名截断后仍认得");
+        assert_eq!(title("ox", "oxforge-3"), "ox / oxforge-3", "前缀要到 `-` 边界");
         assert_eq!(
             title("p", "一二三四五六七八九十甲乙丙"),
             "p / 一二三四五六七八九十甲乙…"
@@ -371,16 +390,19 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pet-hook-calls-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap()
-            .as_millis() as u64;
-        let hook = |event: &str, tool: &str, id: &str| {
+        let now = || {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_millis() as u64
+        };
+        let hook_at = |event: &str, tool: &str, id: &str, at: u64| {
             let v = serde_json::json!({
                 "session_id": "s", "hook_event_name": event, "tool_name": tool, "tool_use_id": id,
             });
-            run(&v.to_string(), &dir, now);
+            run(&v.to_string(), &dir, at);
         };
+        let hook = |event: &str, tool: &str, id: &str| hook_at(event, tool, id, now());
         let calls = dir.join(format!("s{CALLS_SUFFIX}"));
 
         hook("PreToolUse", "WebSearch", "a");
@@ -403,6 +425,12 @@ mod tests {
         hook("PreToolUse", "Read", "e");
         hook("Stop", "", "");
         assert!(!calls.exists(), "一轮结束清掉");
+
+        // 乱序:上一批的 PostToolBatch 起得早、落得晚,不该抹掉下一批已经在跑的 f
+        let batch_started = now() - 1_000;
+        hook("PreToolUse", "Bash", "f");
+        hook_at("PostToolBatch", "", "", batch_started);
+        assert_eq!(pet_state::live_call(&calls), Some(State::Bash), "f 还在跑");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -435,7 +463,9 @@ mod tests {
         let sid = session_id(&serde_json::from_str(&input).unwrap());
         let rec = stored(&dir, &sid);
         assert_eq!((rec.state.as_str(), rec.ts), ("bash", later));
-        assert!(!stale.exists(), "别的会话的旧档该清");
+        assert!(stale.exists(), "工具事件不扫目录");
+        run(&input.replace("PreToolUse", "Stop"), &dir, later);
+        assert!(!stale.exists(), "一轮结束时别的会话的旧档该清");
         assert!(!stale_calls.exists(), "连同它的调用标记");
         assert!(keep.exists(), "不是状态文件的不动");
 
