@@ -50,7 +50,10 @@ process.stdin.on("end", () => {
   const petHook = findPetHook();
   if (petHook) {
     // 起不来（权限、损坏）就退回自己写，不让状态源因此失声
-    const child = spawn(petHook, [], { stdio: ["pipe", "ignore", "ignore"] });
+    // 状态目录按 cchud 自己的配置口径算好再交给 pet-hook:它只认 CCHUD_STATE_DIR 与 ~/.cchud.json,
+    // 认不得 --state-dir、$CCHUD_CONFIG 与脚本旁的 cchud.config.json,不传的话两边会写读不同的目录
+    const env = { ...process.env, CCHUD_STATE_DIR: loadConfig().stateDir };
+    const child = spawn(petHook, [], { stdio: ["pipe", "ignore", "ignore"], env });
     child.on("error", () => writeOwn());
     child.on("exit", (code) => {
       if (code !== 0) writeOwn();
