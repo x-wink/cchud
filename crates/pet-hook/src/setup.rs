@@ -60,42 +60,30 @@ impl Report {
     }
 }
 
-/// 钩子命令:本程序的绝对路径,按 shell 的规矩加引号(Claude Code 把它交给 shell)。
-/// Windows 上走 Git Bash,不加引号的反斜杠会被吃掉:换成正斜杠再包双引号(cmd 也认);
-/// 别处只含安全字符就原样,否则包单引号,路径里的单引号写成 `'\''`
-pub fn command_for(exe: &Path) -> String {
-    quote(&exe.display().to_string(), cfg!(windows))
-}
-
 fn client_command(exe: &Path, client: Client) -> String {
-    let command = command_for(exe);
-    match client {
-        Client::Claude => command,
-        Client::Codex => format!("{command} --client codex"),
-    }
-}
-
-fn quote(path: &str, windows: bool) -> String {
-    if windows {
-        format!("\"{}\"", path.replace('\\', "/"))
-    } else if path
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || "/._-+".contains(c))
-    {
-        path.to_string()
-    } else {
-        format!("'{}'", path.replace('\'', r"'\''"))
-    }
+    client.command_for(exe, cfg!(windows))
 }
 
 /// 命令拆成程序与其余部分:程序可以被双引号或单引号包着(路径带空格)
 fn split_program(command: &str) -> (&str, &str) {
-    let s = command.trim_start();
+    let trimmed = command.trim_start();
+    let powershell = trimmed.starts_with("& ");
+    let s = trimmed.strip_prefix("& ").unwrap_or(trimmed).trim_start();
     match s.chars().next() {
-        Some(q @ ('"' | '\'')) => match s[1..].find(q) {
-            Some(end) => (&s[1..1 + end], &s[2 + end..]),
-            None => (&s[1..], ""),
-        },
+        Some(q @ ('"' | '\'')) => {
+            let mut chars = s[1..].char_indices().peekable();
+            while let Some((i, c)) = chars.next() {
+                if c != q {
+                    continue;
+                }
+                if powershell && q == '\'' && chars.peek().is_some_and(|(_, c)| *c == q) {
+                    chars.next();
+                    continue;
+                }
+                return (&s[1..i + 1], &s[i + 2..]);
+            }
+            (&s[1..], "")
+        }
         _ => {
             let end = s.find(char::is_whitespace).unwrap_or(s.len());
             (&s[..end], &s[end..])
@@ -451,6 +439,8 @@ mod tests {
 
     #[test]
     fn commands_are_quoted_for_the_shell() {
+        let quote =
+            |path: &str, windows: bool| Client::Claude.command_for(Path::new(path), windows);
         assert_eq!(quote("/a/pet-hook", false), "/a/pet-hook");
         assert_eq!(quote("/a b/pet-hook", false), "'/a b/pet-hook'");
         assert_eq!(quote("/it's/pet-hook", false), r"'/it'\''s/pet-hook'");
@@ -467,6 +457,33 @@ mod tests {
                 "{path} 加了引号还认得出"
             );
         }
+    }
+
+    #[test]
+    fn powershell_registrations_are_replaced_and_uninstalled() {
+        let old = "& 'C:/Users/O''Brien $dev/old/pet-hook.exe' --client codex";
+        assert!(is_ours(old, "elsewhere"));
+        assert!(!is_ours("& 'C:/node.exe' pet-hook", "elsewhere"));
+        let ours = Client::Codex.command_for(Path::new(r"C:\Program Files\pet-hook.exe"), true);
+        let mut value = json!({"hooks":{"Stop":[{"hooks":[
+            {"type":"command","command":old}, {"type":"command","command":"node notify.js"}
+        ]}]}});
+        assert_eq!(
+            apply_for(&mut value, &ours, false, Client::Codex)
+                .unwrap()
+                .replaced,
+            ["Stop"]
+        );
+        assert!(
+            apply_for(&mut value, &ours, false, Client::Codex)
+                .unwrap()
+                .is_noop()
+        );
+        apply_for(&mut value, &ours, true, Client::Codex).unwrap();
+        assert_eq!(
+            value["hooks"]["Stop"][0]["hooks"][0]["command"],
+            "node notify.js"
+        );
     }
 
     /// 手写条目把别人的钩子与旧注册放在同一个数组里:只摘我们的那条

@@ -5,10 +5,10 @@ name: pet-hook
 on:
   push:
     branches: [main]
-    paths: ["Cargo.*", "crates/**", "*.js", "tests/**", ".github/workflows/pet-hook.yml"]
+    paths: ["Cargo.*", "crates/**", "*.js", "tests/**", "tools/check-release.ps1", ".github/workflows/pet-hook.yml"]
     tags: ["pet-hook-v*"]
   pull_request:
-    paths: ["Cargo.*", "crates/**", "*.js", "tests/**", ".github/workflows/pet-hook.yml"]
+    paths: ["Cargo.*", "crates/**", "*.js", "tests/**", "tools/check-release.ps1", ".github/workflows/pet-hook.yml"]
 
 jobs:
   test:
@@ -44,6 +44,10 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - run: cargo build -p pet-hook --release --locked --target ${{ matrix.target }}
+      - name: Windows 发行二进制冒烟
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./tools/check-release.ps1 -Binary target/${{ matrix.target }}/release/pet-hook.exe
       - name: 产物改成按平台命名
         shell: bash
         run: |

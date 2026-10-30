@@ -69,6 +69,32 @@ impl Client {
             Self::Codex => "hooks.json",
         }))
     }
+
+    pub fn command_for(self, exe: &Path, windows: bool) -> String {
+        let path = exe.display().to_string();
+        if self == Self::Codex && windows {
+            // Codex 的 Windows Hook 由 PowerShell 执行;带引号的路径要用调用运算符,
+            // 单引号还能避免用户名里的 $ 被展开,路径中的单引号按 PowerShell 规则成对转义。
+            return format!(
+                "& '{}' --client codex",
+                path.replace('\\', "/").replace('\'', "''")
+            );
+        }
+        let command = if windows {
+            format!("\"{}\"", path.replace('\\', "/"))
+        } else if path
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "/._-+".contains(c))
+        {
+            path
+        } else {
+            format!("'{}'", path.replace('\'', r"'\''"))
+        };
+        match self {
+            Self::Claude => command,
+            Self::Codex => format!("{command} --client codex"),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -297,6 +323,22 @@ mod tests {
         assert_eq!(
             session_id(&serde_json::json!({"transcript_path":"C:\\logs\\sid.jsonl"})),
             "sid"
+        );
+    }
+
+    #[test]
+    fn codex_windows_uses_powershell_call_operator_and_literal_path() {
+        assert_eq!(
+            Client::Codex.command_for(Path::new(r"C:\Users\O'Brien $dev\pet-hook.exe"), true),
+            "& 'C:/Users/O''Brien $dev/pet-hook.exe' --client codex"
+        );
+        assert_eq!(
+            Client::Claude.command_for(Path::new(r"C:\Program Files\pet-hook.exe"), true),
+            "\"C:/Program Files/pet-hook.exe\""
+        );
+        assert_eq!(
+            Client::Codex.command_for(Path::new("/a b/pet-hook"), false),
+            "'/a b/pet-hook' --client codex"
         );
     }
 }
