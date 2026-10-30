@@ -1,87 +1,31 @@
-// cchud notify — Claude Code 需要你时提醒你（桌面通知 + 提示音）。
-// 注册为两类钩子：
-//   Stop         —— 主对话答完、把控制权交还给你（前台提示音 Windows Foreground.wav）。
-//   Notification —— 需要你授权 / 等待你输入（铃声 Ring01.wav），具体事由在 stdin 的 message 字段。
-// 凭声音即可分辨「答完了」还是「需要你处理」。
-// 跨平台：Windows 用 PowerShell WinRT Toast（静音）+ SoundPlayer 播 .wav；macOS 用 osascript；Linux 用 notify-send。
-// 钩子会从 stdin 收到会话 JSON（含 cwd / hook_event_name / message），用来组织通知文案。
-// 称呼与文案默认为「小螃蟹」，可经配置或参数自定义，见 config.js。
-const { loadConfig, notificationState, agentInfo, clipName } = require("./config");
-const CFG = loadConfig();
-const fs = require("fs");
+const { loadConfig } = require("./config");
+const { normalizeHook, hookClient, identity } = require("./hook-adapter");
+const { titleFor } = require("./hook-state");
+const { spawn } = require("child_process");
 
-// 会话名的回落来源：transcript 里有两类标题事件，倒序扫描——
-//   custom-title（customTitle）：用户 /rename 设的，优先用，扫到即返回（最新一条）。
-//   ai-title   （aiTitle）    ：Claude 自动生成的，随会话刷新；没有 custom 时回落到最新一条。
-// 都没有（如很短的会话）则返回 ""。
-function titleFromTranscript(tp) {
-  try {
-    if (!tp || !fs.existsSync(tp)) return "";
-    const lines = fs.readFileSync(tp, "utf8").split("\n");
-    let ai = "";
-    for (let i = lines.length - 1; i >= 0; i--) {
-      if (lines[i].indexOf('Title"') < 0) continue; // customTitle / aiTitle
-      let o;
-      try {
-        o = JSON.parse(lines[i]);
-      } catch (e) {
-        continue;
-      }
-      if (o && o.type === "custom-title" && o.customTitle) return clipName(o.customTitle);
-      if (o && o.type === "ai-title" && o.aiTitle && !ai) ai = String(o.aiTitle);
-    }
-    return clipName(ai);
-  } catch (e) {}
-  return "";
+function notificationFor(event, cfg) {
+  if (!event || !(event.kind === "done" || event.state === "wait")) return undefined;
+  const agent = identity(event, cfg);
+  const where = titleFor(event.project, agent.name) + (agent.ref ? ` [${agent.ref}]` : "");
+  const need = event.state === "wait";
+  const body = need ? event.message.trim() || cfg.needBody : cfg.doneBody;
+  return {
+    title: (need ? cfg.needTitle : cfg.doneTitle) + (where ? ` · ${where}` : ""),
+    body,
+    winWav: need ? "Ring01.wav" : "Windows Foreground.wav",
+    macSound: need ? "Funk" : "Glass",
+  };
 }
 
-let s = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (d) => (s += d));
-process.stdin.on("end", () => {
-  let j = {};
-  try {
-    j = JSON.parse(s || "{}");
-  } catch (e) {}
-
-  const path = require("path");
-  const { spawn } = require("child_process");
-  const proj = j.cwd ? path.basename(j.cwd) : "";
-  // 会话名首选 Claude Code 登记的那个（见 config.js agentInfo）——与状态栏、与跨会话寻址用的
-  // 代号是同一串；读不到（旧版 / 非 CLI 入口）才回落 transcript 里的标题。toast 标题装不下太长的
-  // 名字，这里截断（状态栏不截，那边要能照抄去寻址）。
-  const agent = (CFG.sessionName && agentInfo(j.session_id, CFG.sessionsDir)) || {};
-  const sess = clipName(agent.name) || titleFromTranscript(j.transcript_path);
-  const ref = CFG.sessionRef && agent.ref ? ` [${agent.ref}]` : "";
-  // 标题尾巴：项目名 + 会话名都显示（cchud / 会话名）；缺一个、或会话名已含项目名就只显示一个。
-  const where = ((proj && sess && !sess.startsWith(proj) ? `${proj} / ${sess}` : sess || proj) + ref).trim();
-  const isNotif = j.hook_event_name === "Notification";
-  // 只有「必须你操作才能往下走」的交互才值得打扰你——与状态栏 wait 同一套判定（见 config.js）。
-  // 其余 Notification 静默：idle_prompt（闲置 75 分钟提醒）不阻断流程且 Stop 时已经通知过一次，
-  // elicitation_response / auth_success 之类则是事后与杂项通知。
-  if (isNotif && notificationState(j.notification_type) !== "wait") return;
-
-  let title, body, winWav, macSound;
-  if (isNotif) {
-    // 需要授权 / 等待输入：message 由 Claude Code 给出（多为英文），直接作正文。
-    title = where ? `${CFG.needTitle} · ${where}` : CFG.needTitle;
-    body = j.message || CFG.needBody;
-    winWav = "Ring01.wav"; // 等待交互：铃声
-    macSound = "Funk";
-  } else {
-    // Stop：答完了。
-    title = where ? `${CFG.doneTitle} · ${where}` : CFG.doneTitle;
-    body = CFG.doneBody;
-    winWav = "Windows Foreground.wav"; // 完成任务：前台提示音
-    macSound = "Glass";
-  }
-
+function sendNotification(notice, CFG) {
+  const { title, body, winWav, macSound } = notice;
   // 不用 detached + unref：实测 Windows 上 detached 子进程会在父进程退出时被一起回收，
   // toast 来不及注册就没了（声音同理）。改为让本进程等子进程跑完——约 1 秒（PlaySync 会等提示音
   // 播完）。Stop / Notification 触发时用户已看到回复，短暂阻塞无碍。
   const fire = (cmd, args) => {
     try {
-      spawn(cmd, args, { stdio: "ignore", windowsHide: true });
+      const child = spawn(cmd, args, { stdio: "ignore", windowsHide: true });
+      child.on("error", () => {});
     } catch (e) {}
   };
 
@@ -118,4 +62,21 @@ ${CFG.sound ? `(New-Object System.Media.SoundPlayer "$env:WINDIR\\Media\\${winWa
       : "";
     fire("sh", ["-c", `notify-send ${shq(title)} ${shq(body)}${paplay}`]);
   }
-});
+
+}
+
+if (require.main === module) {
+  let input = "";
+  process.stdin.setEncoding("utf8");
+  process.stdin.on("data", (data) => input += data);
+  process.stdin.on("end", () => {
+    try {
+      const cfg = loadConfig();
+      const event = normalizeHook(JSON.parse(input || "{}"), hookClient());
+      const notice = notificationFor(event, cfg);
+      if (notice) sendNotification(notice, cfg);
+    } catch {}
+  });
+}
+
+module.exports = { notificationFor };

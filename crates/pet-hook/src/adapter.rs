@@ -1,0 +1,302 @@
+use std::path::{Path, PathBuf};
+
+use pet_state::State;
+use serde_json::Value;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Client {
+    #[default]
+    Claude,
+    Codex,
+}
+
+impl Client {
+    pub fn parse(s: &str) -> Result<Self, String> {
+        match s {
+            "claude" => Ok(Self::Claude),
+            "codex" => Ok(Self::Codex),
+            _ => Err(format!("不支持的客户端 {s},可用 claude 或 codex")),
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Claude => "claude",
+            Self::Codex => "codex",
+        }
+    }
+
+    pub fn events(self) -> &'static [&'static str] {
+        match self {
+            Self::Claude => &[
+                "UserPromptSubmit",
+                "PreToolUse",
+                "PostToolUse",
+                "PostToolUseFailure",
+                "PostToolBatch",
+                "Notification",
+                "Stop",
+                "SessionStart",
+                "SessionEnd",
+            ],
+            Self::Codex => &[
+                "UserPromptSubmit",
+                "PreToolUse",
+                "PostToolUse",
+                "PermissionRequest",
+                "Stop",
+                "Interrupt",
+                "SessionStart",
+                "SessionEnd",
+            ],
+        }
+    }
+
+    pub fn config_dir(self) -> Option<PathBuf> {
+        let (env, fallback) = match self {
+            Self::Claude => ("CLAUDE_CONFIG_DIR", ".claude"),
+            Self::Codex => ("CODEX_HOME", ".codex"),
+        };
+        std::env::var_os(env)
+            .filter(|d| !d.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| pet_state::home_dir().map(|h| h.join(fallback)))
+    }
+
+    pub fn settings_path(self) -> Option<PathBuf> {
+        Some(self.config_dir()?.join(match self {
+            Self::Claude => "settings.json",
+            Self::Codex => "hooks.json",
+        }))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Kind {
+    Prompt,
+    ToolStart,
+    ToolEnd,
+    BatchEnd,
+    Notice,
+    Done,
+    Start,
+    End,
+    Interrupt,
+}
+
+#[derive(Debug)]
+pub struct Event {
+    pub kind: Kind,
+    pub state: State,
+    /// 落盘事件沿用读方已有的词汇;客户端原始事件另存 source_event。
+    pub event: String,
+    pub source: String,
+    pub source_event: String,
+    pub session_id: String,
+    pub turn_id: String,
+    pub call_id: String,
+    pub tool: String,
+    pub transcript: String,
+    pub message: String,
+    pub project: String,
+    client: Client,
+}
+
+fn text<'a>(v: &'a Value, key: &str) -> &'a str {
+    v.get(key).and_then(Value::as_str).unwrap_or("")
+}
+
+pub fn session_id(input: &Value) -> String {
+    let sid = text(input, "session_id");
+    let raw = if sid.is_empty() {
+        text(input, "transcript_path")
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or("")
+            .trim_end_matches(".jsonl")
+    } else {
+        sid
+    };
+    raw.chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '-'))
+        .collect()
+}
+
+pub fn normalize(client: Client, input: &Value) -> Option<Event> {
+    let raw = text(input, "hook_event_name");
+    if !client.events().contains(&raw) {
+        return None;
+    }
+    let tool = text(input, "tool_name");
+    let (kind, state, event) = match raw {
+        "UserPromptSubmit" => (Kind::Prompt, State::Think, raw),
+        "PreToolUse" if client == Client::Codex && tool == "request_user_input" => {
+            (Kind::ToolStart, State::Wait, "Notification")
+        }
+        "PreToolUse" => (Kind::ToolStart, tool_state(client, tool), raw),
+        "PostToolUse" | "PostToolUseFailure" => (Kind::ToolEnd, State::Think, raw),
+        "PostToolBatch" => (Kind::BatchEnd, State::Think, raw),
+        "Notification" => (
+            Kind::Notice,
+            notification_state(input.get("notification_type").and_then(Value::as_str))?,
+            raw,
+        ),
+        "PermissionRequest" => (Kind::Notice, State::Wait, "Notification"),
+        "Stop" => (Kind::Done, State::Idle, raw),
+        "SessionStart" if client == Client::Codex && text(input, "source") == "compact" => {
+            (Kind::Start, State::Think, raw)
+        }
+        "SessionStart" => (Kind::Start, State::Idle, raw),
+        "SessionEnd" => (Kind::End, State::Idle, raw),
+        "Interrupt" => (Kind::Interrupt, State::Idle, raw),
+        _ => return None,
+    };
+    let sid = session_id(input);
+    if sid.is_empty() {
+        return None;
+    }
+    let message = match client {
+        Client::Codex if raw == "PermissionRequest" => text(&input["tool_input"], "description"),
+        _ => text(input, "message"),
+    };
+    Some(Event {
+        kind,
+        state,
+        event: event.into(),
+        source: client.name().into(),
+        source_event: raw.into(),
+        session_id: sid,
+        turn_id: text(input, "turn_id").into(),
+        call_id: text(input, "tool_use_id")
+            .chars()
+            .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-'))
+            .collect(),
+        tool: tool.into(),
+        transcript: text(input, "transcript_path").into(),
+        message: message.into(),
+        project: text(input, "cwd")
+            .trim_end_matches(['/', '\\'])
+            .rsplit(['/', '\\'])
+            .next()
+            .unwrap_or("")
+            .into(),
+        client,
+    })
+}
+
+pub fn tool_state(client: Client, name: &str) -> State {
+    if client == Client::Codex && name == "apply_patch" {
+        return State::Edit;
+    }
+    match name {
+        "Bash" => State::Bash,
+        "WebSearch" | "WebFetch" => State::Web,
+        "Read" | "Grep" | "Glob" | "LS" | "NotebookRead" => State::Read,
+        "Edit" | "Write" | "MultiEdit" | "NotebookEdit" | "Update" => State::Edit,
+        _ => State::Think,
+    }
+}
+
+pub fn notification_state(kind: Option<&str>) -> Option<State> {
+    let t = kind.unwrap_or("");
+    if t.is_empty()
+        || t.contains("permission_prompt")
+        || t.contains("needs_input")
+        || t.contains("elicitation_dialog")
+        || t.contains("elicitation_url_dialog")
+    {
+        Some(State::Wait)
+    } else if t.contains("elicitation_response") || t.contains("elicitation_complete") {
+        Some(State::Think)
+    } else if t == "idle_prompt" {
+        Some(State::Idle)
+    } else {
+        None
+    }
+}
+
+impl Event {
+    pub fn session_name(&self) -> String {
+        match self.client {
+            Client::Codex => format!(
+                "Codex #{}",
+                self.session_id.chars().take(8).collect::<String>()
+            ),
+            Client::Claude => self
+                .client
+                .config_dir()
+                .and_then(|d| claude_session_name(&d.join("sessions"), &self.session_id))
+                .unwrap_or_default(),
+        }
+    }
+}
+
+fn claude_session_name(dir: &Path, sid: &str) -> Option<String> {
+    std::fs::read_dir(dir).ok()?.flatten().find_map(|entry| {
+        let path = entry.path();
+        if path.extension().is_none_or(|x| x != "json") {
+            return None;
+        }
+        let v: Value = serde_json::from_slice(&std::fs::read(path).ok()?).ok()?;
+        (text(&v, "sessionId") == sid).then(|| text(&v, "name").to_string())
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hook::{Action, decide};
+
+    #[test]
+    fn shared_fixtures_normalize_both_clients() {
+        let cases: Value =
+            serde_json::from_str(include_str!("../../../tests/fixtures/hooks.json")).unwrap();
+        for case in cases.as_array().unwrap() {
+            let client = Client::parse(case["client"].as_str().unwrap()).unwrap();
+            let event = normalize(client, &case["input"]);
+            if case["expected"].is_null() {
+                assert!(event.is_none(), "{}", case["name"]);
+                continue;
+            }
+            let event = event.unwrap();
+            let Action::Write(record) = decide(&event, 1000) else {
+                panic!("{}", case["name"])
+            };
+            let record = serde_json::to_value(record).unwrap();
+            for (key, value) in case["expected"].as_object().unwrap() {
+                assert_eq!(&record[key], value, "{}:{key}", case["name"]);
+            }
+            assert_eq!(record["source"], case["client"]);
+            assert_eq!(record["source_event"], case["input"]["hook_event_name"]);
+            assert_eq!(record["session_id"], case["input"]["session_id"]);
+        }
+    }
+
+    #[test]
+    fn client_paths_and_bad_fields() {
+        assert!(Client::parse("other").is_err());
+        assert!(
+            Client::Claude
+                .settings_path()
+                .unwrap()
+                .ends_with("settings.json")
+        );
+        assert!(
+            Client::Codex
+                .settings_path()
+                .unwrap()
+                .ends_with("hooks.json")
+        );
+        assert!(
+            normalize(
+                Client::Codex,
+                &serde_json::json!({"session_id":12,"hook_event_name":"Stop"})
+            )
+            .is_none()
+        );
+        assert_eq!(
+            session_id(&serde_json::json!({"transcript_path":"C:\\logs\\sid.jsonl"})),
+            "sid"
+        );
+    }
+}

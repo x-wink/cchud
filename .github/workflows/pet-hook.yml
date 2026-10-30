@@ -1,14 +1,14 @@
 # Rust 侧(pet-state / pet-hook)的门禁与发布:push 跑测试;推 `pet-hook-v*` tag 出四平台二进制挂到 Release。
-# Node 侧脚本没有构建步骤,不在这里。
+# Node 与 Rust 用同一批夹具验事件语义,并验实际二进制的委托与安装。
 name: pet-hook
 
 on:
   push:
     branches: [main]
-    paths: ["Cargo.*", "crates/**", ".github/workflows/pet-hook.yml"]
+    paths: ["Cargo.*", "crates/**", "*.js", "tests/**", ".github/workflows/pet-hook.yml"]
     tags: ["pet-hook-v*"]
   pull_request:
-    paths: ["Cargo.*", "crates/**"]
+    paths: ["Cargo.*", "crates/**", "*.js", "tests/**", ".github/workflows/pet-hook.yml"]
 
 jobs:
   test:
@@ -16,8 +16,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - run: cargo test --workspace --locked
       - run: cargo clippy --workspace --locked -- -D warnings
+      - run: cargo build -p pet-hook --locked
+      - run: node --test tests/hooks.test.js
+        env:
+          CCHUD_TEST_PET_HOOK: ${{ github.workspace }}/target/debug/pet-hook
 
   build:
     if: startsWith(github.ref, 'refs/tags/pet-hook-v')

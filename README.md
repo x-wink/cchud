@@ -4,6 +4,8 @@
 
 `cchud` 是给 [Claude Code](https://claude.com/claude-code) 用的 `statusLine` 脚本。它从 stdin 读取 Claude Code 传入的会话 JSON，输出三行带颜色的终端状态栏。
 
+实时状态源与桌面通知同时支持 **Claude Code / Codex**，两端共用同一状态目录和七态契约；终端状态栏仅用于 Claude Code。
+
 ## 效果
 
 ![cchud 状态栏预览](preview.png)
@@ -106,6 +108,51 @@ pet-hook setup --dry-run  # 只看会改什么;--uninstall 只删自己加的;--
 
 `setup` 认 `CLAUDE_CONFIG_DIR`，会把旧的 `pet --hook` 注册换成自己的路径，别的钩子与键序原样保留。手工注册的等价写法见下一节，把 `state.js` 换成 `pet-hook` 的绝对路径即可。
 已经注册着 `state.js` 的不用改：它发现本机有 `pet-hook`（`PET_HOOK` 环境变量、`PATH`、`~/.cargo/bin`）就整段委托给它，没有才自己写——两套写方只有一份口径。
+
+## Codex 接入（实时状态与通知）
+
+实现状态、验证与交接见 [兼容路线图](docs/roadmaps/claude-codex-hooks.md)。
+
+安装本仓构建的 `pet-hook` 后执行：
+
+```sh
+pet-hook setup --client codex --dry-run
+pet-hook setup --client codex
+# 同时安装两端：pet-hook setup --client all
+# 卸载 Codex：pet-hook setup --client codex --uninstall
+```
+
+缺省的 `pet-hook setup` 仍只配置 Claude Code。Codex 写 `$CODEX_HOME/hooks.json`（默认 `~/.codex/hooks.json`），Claude 写 `$CLAUDE_CONFIG_DIR/settings.json`（默认 `~/.claude/settings.json`）；`--settings <配置.json>` 可为单个客户端另指文件。安装幂等、保留别人的配置、已有文件写前备份为同名 `.bak`。这是源码能力，安装已有发布二进制前先用 `pet-hook --help` 确认支持 `--client`。
+
+Codex 新开会话后需要在 **`/hooks` 审查并信任**这些钩子，否则不会运行。若配置关闭了 `[features].hooks`，需要先启用。见 [Codex 官方 Hooks 文档](https://learn.chatgpt.com/docs/hooks)。
+
+| 行为 | Claude Code | Codex | 共用结果 |
+| --- | --- | --- | --- |
+| 提交 | `UserPromptSubmit` | `UserPromptSubmit` | `think` |
+| 工具开始 | `PreToolUse` | `PreToolUse` | 按工具分态；Codex `apply_patch` 为 `edit`、shell 为 `Bash` |
+| 工具结束 | `PostToolUse` / `PostToolUseFailure` | `PostToolUse`，含命令失败 | `think`；并行调用标记保留仍在跑的调用 |
+| 审批 / 输入 | 阻断类 `Notification` | `PermissionRequest` / `request_user_input` 工具开始 | `wait`，提示需要处理 |
+| 答完 | `Stop` | `Stop` | `idle`，提示答完 |
+| 中断 | HUD / 桌宠的 Claude 日志兜底 | `Interrupt` | Codex 立即 `idle`、清调用标记，不提示答完 |
+| 结束 | `SessionEnd` | `SessionEnd` | 清理会话档与调用标记 |
+
+Codex 的 `PermissionRequest` 表示进入审批流程，其他 Hook 可能自动放行；这时 `wait` 可能短暂出现，后续工具结束事件会解除。同步输入工具 `request_user_input` 会提示需要处理，异步提问不算阻断。托管网页搜索不发工具 Hook，不能保证显示 `web`；经 shell 读文件仍显示 `bash`。`SessionStart` 的 `compact` 来源表示轮内压缩后继续，保持 `think`。子代理结束不算主会话答完。会话身份显示项目名与 `Codex #短id`，不读取 Claude 的会话登记。
+
+如需桌面通知，在 Codex 的 `hooks.json` 已有 `hooks` 下合并下列条目，保留 `setup` 写入的状态钩子。通知仍需 Node：
+
+```json
+{
+  "hooks": {
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node \"/path/to/cchud/notify.js\" --client codex", "async": true }] }],
+    "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "node \"/path/to/cchud/notify.js\" --client codex", "async": true }] }],
+    "PreToolUse": [{ "matcher": "^request_user_input$", "hooks": [{ "type": "command", "command": "node \"/path/to/cchud/notify.js\" --client codex", "async": true }] }]
+  }
+}
+```
+
+不装 Rust 写方时，也能把 Codex 上述八类事件的状态命令手动注册为 `node "/path/to/cchud/state.js" --client codex`。工具事件不加 matcher。`SessionEnd` 同步且 `timeout: 3`，其他事件可加 `async: true`；`state.js` 发现新版 `pet-hook` 就委托，旧二进制拒绝客户端参数或启动失败则回退 Node 写方。两条链路的事件语义由同一批夹具校验。
+
+状态档的 `event` 是共用语义，保留现有读方识别的事件词汇（如审批归一为 `Notification`）；`source`、`source_event`、`session_id`、可选的 `turn_id` 用于溯源。新增字段可缺省，旧状态档与旧读方仍可用。各客户端差异集中在 `hook-adapter.js` 与 `crates/pet-hook/src/adapter.rs`，状态写入与通知不判断客户端。
 
 ## 实时状态源（hooks，可选）
 
@@ -239,6 +286,17 @@ Claude Code 的状态栏默认**只在「有新助手消息」时刷新**——�
 2. **「正在等待响应」与「提交后秒取消」无法即时区分**：Claude Code 取消时既不触发任何 hook，也不在日志留下可识别痕迹，两者的日志状态完全一致。为避免秒取消后**永久**卡在「思考中」，脚本采用兜底——一条用户输入悬挂超过 **60 秒**仍无任何响应跟进，即判定为已取消 / 久挂并回到「休息中」（`claude --resume` 回来也借此自愈）。代价是秒取消后需等这段时间才回休息；阈值在 `hud.js` 的 `IDLE_AFTER_MS` 可调。
 
 ## 调试
+
+事件回归与静态检查：
+
+```sh
+cargo test --workspace --locked
+cargo clippy --workspace --all-targets --locked -- -D warnings
+cargo build -p pet-hook --locked
+CCHUD_TEST_PET_HOOK="$PWD/target/debug/pet-hook" node --test tests/hooks.test.js
+```
+
+Node 测试使用内置测试器，无第三方依赖；需要 Node 18 或更新版本。`CCHUD_TEST_PET_HOOK` 指向刚构建的二进制时，还会验证两端安装、静默委托与 Rust / Node 落盘一致。测试只用临时目录，不改实际客户端配置、不弹通知。
 
 不接 Claude Code 时，可手动喂一段假 JSON 预览效果：
 

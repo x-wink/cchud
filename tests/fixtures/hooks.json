@@ -1,0 +1,453 @@
+[
+  {
+    "name": "Claude 提交",
+    "client": "claude",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "UserPromptSubmit"
+    },
+    "expected": {
+      "state": "think",
+      "event": "UserPromptSubmit"
+    }
+  },
+  {
+    "name": "Claude 命令",
+    "client": "claude",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "PreToolUse",
+      "tool_name": "Bash",
+      "tool_use_id": "a"
+    },
+    "expected": {
+      "state": "bash",
+      "event": "PreToolUse"
+    }
+  },
+  {
+    "name": "Claude 读取",
+    "client": "claude",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "PreToolUse",
+      "tool_name": "Grep"
+    },
+    "expected": {
+      "state": "read",
+      "event": "PreToolUse"
+    }
+  },
+  {
+    "name": "Claude 搜索",
+    "client": "claude",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "PreToolUse",
+      "tool_name": "WebSearch"
+    },
+    "expected": {
+      "state": "web",
+      "event": "PreToolUse"
+    }
+  },
+  {
+    "name": "Claude 编辑",
+    "client": "claude",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "PreToolUse",
+      "tool_name": "Edit"
+    },
+    "expected": {
+      "state": "edit",
+      "event": "PreToolUse"
+    }
+  },
+  {
+    "name": "Claude 工具失败",
+    "client": "claude",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "PostToolUseFailure"
+    },
+    "expected": {
+      "state": "think",
+      "event": "PostToolUseFailure"
+    }
+  },
+  {
+    "name": "Claude 批次结束",
+    "client": "claude",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "PostToolBatch"
+    },
+    "expected": {
+      "state": "think",
+      "event": "PostToolBatch"
+    }
+  },
+  {
+    "name": "Claude 授权",
+    "client": "claude",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "Notification",
+      "notification_type": "permission_prompt",
+      "message": "需要授权"
+    },
+    "expected": {
+      "state": "wait",
+      "event": "Notification",
+      "say": "需要授权"
+    }
+  },
+  {
+    "name": "Claude 旧版授权",
+    "client": "claude",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "Notification"
+    },
+    "expected": {
+      "state": "wait",
+      "event": "Notification",
+      "say": "需要你处理"
+    }
+  },
+  {
+    "name": "Claude 闲置提醒",
+    "client": "claude",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "Notification",
+      "notification_type": "idle_prompt"
+    },
+    "expected": {
+      "state": "idle",
+      "event": "Notification"
+    }
+  },
+  {
+    "name": "Claude 输入结束",
+    "client": "claude",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "Notification",
+      "notification_type": "elicitation_complete"
+    },
+    "expected": {
+      "state": "think",
+      "event": "Notification"
+    }
+  },
+  {
+    "name": "Claude 无关通知",
+    "client": "claude",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "Notification",
+      "notification_type": "auth_success"
+    },
+    "expected": null
+  },
+  {
+    "name": "Claude 子代理答完",
+    "client": "claude",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "SubagentStop"
+    },
+    "expected": null
+  },
+  {
+    "name": "Claude 启动",
+    "client": "claude",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "SessionStart"
+    },
+    "expected": {
+      "state": "idle",
+      "event": "SessionStart"
+    }
+  },
+  {
+    "name": "Claude 答完",
+    "client": "claude",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "Stop"
+    },
+    "expected": {
+      "state": "idle",
+      "event": "Stop",
+      "say": "答完了"
+    }
+  },
+  {
+    "name": "Claude 忽略 Codex 事件",
+    "client": "claude",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "Interrupt"
+    },
+    "expected": null
+  },
+  {
+    "name": "Codex 启动",
+    "client": "codex",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "SessionStart",
+      "transcript_path": null
+    },
+    "expected": {
+      "state": "idle",
+      "event": "SessionStart"
+    }
+  },
+  {
+    "name": "Codex 压缩后继续",
+    "client": "codex",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "SessionStart",
+      "source": "compact"
+    },
+    "expected": {
+      "state": "think",
+      "event": "SessionStart"
+    }
+  },
+  {
+    "name": "Codex 提交",
+    "client": "codex",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "UserPromptSubmit",
+      "turn_id": "turn-1"
+    },
+    "expected": {
+      "state": "think",
+      "event": "UserPromptSubmit"
+    }
+  },
+  {
+    "name": "Codex 命令",
+    "client": "codex",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "PreToolUse",
+      "tool_name": "Bash",
+      "tool_input": {
+        "command": "cargo check"
+      },
+      "tool_use_id": "call-1"
+    },
+    "expected": {
+      "state": "bash",
+      "event": "PreToolUse"
+    }
+  },
+  {
+    "name": "Codex 编辑",
+    "client": "codex",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "PreToolUse",
+      "tool_name": "apply_patch",
+      "tool_use_id": "call-2"
+    },
+    "expected": {
+      "state": "edit",
+      "event": "PreToolUse"
+    }
+  },
+  {
+    "name": "Codex 工具失败也走 Post",
+    "client": "codex",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "PostToolUse",
+      "tool_name": "Bash",
+      "tool_response": {
+        "exit_code": 1
+      }
+    },
+    "expected": {
+      "state": "think",
+      "event": "PostToolUse"
+    }
+  },
+  {
+    "name": "Codex 审批",
+    "client": "codex",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "PermissionRequest",
+      "tool_name": "Bash",
+      "tool_input": {
+        "description": "允许执行构建？"
+      }
+    },
+    "expected": {
+      "state": "wait",
+      "event": "Notification",
+      "say": "允许执行构建？"
+    }
+  },
+  {
+    "name": "Codex 审批缺少说明",
+    "client": "codex",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "PermissionRequest",
+      "tool_input": {}
+    },
+    "expected": {
+      "state": "wait",
+      "event": "Notification",
+      "say": "需要你处理"
+    }
+  },
+  {
+    "name": "Codex 等待输入",
+    "client": "codex",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "PreToolUse",
+      "tool_name": "request_user_input",
+      "tool_use_id": "input-1"
+    },
+    "expected": {
+      "state": "wait",
+      "event": "Notification",
+      "say": "需要你处理"
+    }
+  },
+  {
+    "name": "Codex 异步提问不阻塞",
+    "client": "codex",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "PreToolUse",
+      "tool_name": "request_user_input_async"
+    },
+    "expected": {
+      "state": "think",
+      "event": "PreToolUse"
+    }
+  },
+  {
+    "name": "Codex 中断不报答完",
+    "client": "codex",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "Interrupt"
+    },
+    "expected": {
+      "state": "idle",
+      "event": "Interrupt",
+      "say": ""
+    }
+  },
+  {
+    "name": "Codex 答完",
+    "client": "codex",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "Stop"
+    },
+    "expected": {
+      "state": "idle",
+      "event": "Stop",
+      "say": "答完了"
+    }
+  },
+  {
+    "name": "Codex 子代理不能报主会话答完",
+    "client": "codex",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "SubagentStop",
+      "agent_id": "child"
+    },
+    "expected": null
+  },
+  {
+    "name": "Codex 不接 Claude 通知",
+    "client": "codex",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "Notification",
+      "notification_type": "permission_prompt"
+    },
+    "expected": null
+  },
+  {
+    "name": "Codex 不接 Claude 失败事件",
+    "client": "codex",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "PostToolUseFailure"
+    },
+    "expected": null
+  },
+  {
+    "name": "未知事件",
+    "client": "codex",
+    "input": {
+      "session_id": "test-session",
+      "cwd": "/workspace/demo",
+      "hook_event_name": "Unknown"
+    },
+    "expected": null
+  },
+  {
+    "name": "损坏输入",
+    "client": "codex",
+    "input": null,
+    "expected": null
+  },
+  {
+    "name": "无会话标识",
+    "client": "codex",
+    "input": {
+      "hook_event_name": "Stop"
+    },
+    "expected": null
+  }
+]

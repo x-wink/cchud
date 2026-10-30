@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/pet-state", "crates/pet-hook"]
 
 # Rust 侧是 oxforge pet 桌宠的开源半边:pet-state 是状态文件契约(闭源的小兽本体经 git 依赖取它),
-# pet-hook 是 Claude Code 钩子的写方,与 state.js 同一口径、写同一个目录。Node 侧(hud.js 等)照旧
+# pet-hook 适配 Claude Code / Codex 的钩子,与 state.js 同一口径、写同一个目录。
 [workspace.package]
 edition = "2024"
 license = "MIT"

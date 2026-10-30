@@ -62,6 +62,15 @@ pub struct Record {
     pub say: String,
     /// 说话的是哪个会话(项目名 / 会话名),只在 `say` 非空时写
     pub title: String,
+    /// 来源只供辨识与溯源,状态与事件语义由写方归一。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub source: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub source_event: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub session_id: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub turn_id: String,
 }
 
 pub const RECORD_VERSION: u32 = 1;
@@ -135,7 +144,9 @@ mod disk {
                 let path = e.path();
                 let name = e.file_name();
                 let name = name.to_str()?;
-                if name.ends_with(&format!(".{DONE_EXT}")) || calls.join(format!("{name}.{DONE_EXT}")).exists() {
+                if name.ends_with(&format!(".{DONE_EXT}"))
+                    || calls.join(format!("{name}.{DONE_EXT}")).exists()
+                {
                     return None;
                 }
                 let state = State::parse(fs::read_to_string(&path).ok()?.trim())?;
@@ -161,8 +172,19 @@ mod tests {
     /// 旧档缺字段照读:契约只加不减
     #[test]
     fn record_tolerates_missing_fields() {
-        let r: Record = serde_json::from_str(r#"{"version":1,"state":"wait","event":"Notification","ts":1}"#).unwrap();
+        let r: Record =
+            serde_json::from_str(r#"{"version":1,"state":"wait","event":"Notification","ts":1}"#)
+                .unwrap();
         assert_eq!((r.say.as_str(), r.title.as_str(), r.ts), ("", "", 1));
+        assert_eq!(
+            (
+                r.source.as_str(),
+                r.source_event.as_str(),
+                r.session_id.as_str(),
+                r.turn_id.as_str()
+            ),
+            ("", "", "", "")
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -173,7 +195,12 @@ mod tests {
         let path = dir.join("nested").join("s.json");
         write_atomic(&path, b"{}").unwrap();
         assert_eq!(std::fs::read(&path).unwrap(), b"{}");
-        assert!(!dir.join("nested").join(format!("s.json.{}.tmp", std::process::id())).exists(), "临时文件被顶替掉");
+        assert!(
+            !dir.join("nested")
+                .join(format!("s.json.{}.tmp", std::process::id()))
+                .exists(),
+            "临时文件被顶替掉"
+        );
         remove(&path).unwrap();
         remove(&path).unwrap();
         let _ = std::fs::remove_dir_all(&dir);
@@ -185,7 +212,10 @@ mod tests {
         // 只验环境变量这一档:默认档依赖主目录与 ~/.cchud.json,不在测试里碰用户目录
         let before = std::env::var_os("CCHUD_STATE_DIR");
         unsafe { std::env::set_var("CCHUD_STATE_DIR", "/tmp/pet-state-env") };
-        assert_eq!(state_dir(), Some(std::path::PathBuf::from("/tmp/pet-state-env")));
+        assert_eq!(
+            state_dir(),
+            Some(std::path::PathBuf::from("/tmp/pet-state-env"))
+        );
         match before {
             Some(v) => unsafe { std::env::set_var("CCHUD_STATE_DIR", v) },
             None => unsafe { std::env::remove_var("CCHUD_STATE_DIR") },
