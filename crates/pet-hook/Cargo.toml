@@ -1,6 +1,6 @@
 [package]
 name = "pet-hook"
-version = "0.1.0"
+version = "0.2.0"
 description = "Claude Code / Codex 钩子的写方:归一化 stdin 事件,把实时状态原子写进目录,供 cchud 与 oxforge pet 桌宠读"
 edition.workspace = true
 license.workspace = true

@@ -122,7 +122,7 @@ pet-hook setup --client codex
 # 卸载 Codex：pet-hook setup --client codex --uninstall
 ```
 
-缺省的 `pet-hook setup` 仍只配置 Claude Code。Codex 写 `$CODEX_HOME/hooks.json`（默认 `~/.codex/hooks.json`），Claude 写 `$CLAUDE_CONFIG_DIR/settings.json`（默认 `~/.claude/settings.json`）；`--settings <配置.json>` 可为单个客户端另指文件。安装幂等、保留别人的配置、已有文件写前备份为同名 `.bak`。这是源码能力，安装已有发布二进制前先用 `pet-hook --help` 确认支持 `--client`。
+缺省的 `pet-hook setup` 仍只配置 Claude Code。Codex 写 `$CODEX_HOME/hooks.json`（默认 `~/.codex/hooks.json`），Claude 写 `$CLAUDE_CONFIG_DIR/settings.json`（默认 `~/.claude/settings.json`）；`--settings <配置.json>` 可为单个客户端另指文件。安装幂等、保留别人的配置、已有文件写前备份为同名 `.bak`。Codex 接入需要 `pet-hook 0.2.0` 或更新版本。
 
 Codex 新开会话后需要在 **`/hooks` 审查并信任**这些钩子，否则不会运行。若配置关闭了 `[features].hooks`，需要先启用。见 [Codex 官方 Hooks 文档](https://learn.chatgpt.com/docs/hooks)。
 
