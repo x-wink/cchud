@@ -14,7 +14,7 @@
 
 ## 验证
 
-macOS 本机通过 24 项 Rust 测试、41 项 Node 测试、Clippy 与格式检查。回归覆盖两端事件、并行调用、中断清理、安装与卸载、旧二进制回退，以及 Rust / Node 对共用夹具的落盘一致性。Windows / Linux 尚未进行真实客户端联调。
+本机通过 26 项 Rust 测试、41 项 Node 测试、Clippy 与格式检查。回归覆盖两端事件、并行调用、中断清理、安装与卸载、旧二进制回退，以及 Rust / Node 对共用夹具的落盘一致性。Windows 发行二进制另在原生 PowerShell 验证特殊路径的安装、事件执行与卸载。Codex 的真实客户端接入已在 macOS 验证，Windows / Linux 尚未进行完整客户端联调。
 
 ```sh
 cargo test --workspace --locked
@@ -32,3 +32,21 @@ CCHUD_TEST_PET_HOOK="$PWD/target/debug/pet-hook" node --test tests/hooks.test.js
 状态目录为 `~/.cchud/state`。Claude 的九个既有钩子与配置内容保持不变；Codex 沿用桌宠状态及气泡提示，没有额外开启系统桌面通知。安装前的本机二进制与 Claude 配置备份在 `/tmp/cchud-config-backup/`，临时目录不作为跨会话事实来源。
 
 本轮启动的安装、测试、配置核验进程及用于审查 Hook 的 Codex CLI 均已退出，没有遗留开发服务或浏览器。当前无未完成的代码步骤；后续入口为本文件与 README，正式 tag 与发版须另获授权。
+
+## 0.2.0 发行交接
+
+用户已授权本次发版。发行单元为 `pet-hook`，正式 tag 为 `pet-hook-v0.2.0`，指向 `48fb6ba3f63ccaa71ba33157b90db3d3619f81bb`；独立代码审查通过，修正了 Windows Codex 的 PowerShell 调用与卸载识别。
+
+- 远端门禁在 GitHub Actions：[main 门禁 41002275359](https://github.com/x-wink/cchud/actions/runs/41002275359) 通过后推 tag，[四平台构建 41002370205](https://github.com/x-wink/cchud/actions/runs/41002370205) 全部通过，Windows 原生 PowerShell 冒烟通过。
+- [pet-hook 0.2.0 草稿](https://github.com/x-wink/cchud/releases/tag/untagged-7d30ee6dceab0e7c2dd9) 已就绪，Release ID 为 `428650678`。四份二进制及 `SHA256SUMS` 齐全，下载后逐项校验通过；macOS Intel 发行二进制再次通过 41 项 Node 回归。
+- Release 正文在 [发行说明](../releases/pet-hook-0.2.0.md)。产物与本机校验记录在 `/tmp/cchud-release-0.2.0/`；跨会话依据以 GitHub Release、Actions 与本文件为准。
+- Homebrew 更新已准备在 `/Users/mac/workspace/homebrew-tap/Formula/pet-hook.rb` 与其 README，版本、下载地址与三平台 SHA 已更新，Ruby 语法检查通过；尚未提交推送，避免公开指向草稿的下载地址。
+
+| 产物 | SHA256 |
+| --- | --- |
+| macOS arm64 | `05e0c9662af8c50bd9096a3983b0ee2a128aa8443e06ba1ef2b2cd337234e9f3` |
+| macOS x86_64 | `462f9302fcab785c36035c419bbd78ad0e1727908c8e77399fb510b5b930444a` |
+| Windows x86_64 | `0a2f974c441d39b0ed82f7323da51230f3d81783eeddd5095e984f38ee2837e3` |
+| Linux x86_64 | `fe7946a9b00621bb455d8c3f5d08f577f6af78384785ec24fd23dbdefd20c2c3` |
+
+剩余步骤：按 release-ci 的「产物线优先草稿 Release，人工确认再 Publish」要求，等待用户核对这份具体草稿后确认公开。确认后公开现有 Release 并设为 Latest，验证公开下载，再提交推送 Homebrew 更新并验证 `brew fetch`；不重打或移动 tag、不重建产物。本轮未发布其他单元。
