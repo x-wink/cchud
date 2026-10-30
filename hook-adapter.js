@@ -157,4 +157,14 @@ function identity(event, cfg) {
   };
 }
 
-module.exports = { normalizeHook, hookClient, hookArgs, identity, toolState, notificationState, agentInfo, clipName };
+function liveLock(event) {
+  if (event.source !== "codex" || !event.transcript) return undefined;
+  for (let dir = path.dirname(event.transcript); path.dirname(dir) !== dir; dir = path.dirname(dir)) {
+    if (path.basename(dir) !== "sessions") continue;
+    const lock = path.join(path.dirname(dir), "thread-writer-locks", event.session_id + ".lock");
+    try { return fs.statSync(lock).isFile() ? lock : undefined; } catch { return undefined; }
+  }
+  return undefined;
+}
+
+module.exports = { normalizeHook, hookClient, hookArgs, identity, liveLock, toolState, notificationState, agentInfo, clipName };

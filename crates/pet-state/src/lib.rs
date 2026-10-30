@@ -71,6 +71,10 @@ pub struct Record {
     pub session_id: String,
     #[serde(skip_serializing_if = "String::is_empty")]
     pub turn_id: String,
+    /// 可选活性凭据:客户端持有的排他锁路径。锁释放或文件消失表示会话已结束;
+    /// 不提供凭据的旧写方仍按既有过期规则读取。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub live_lock: String,
 }
 
 pub const RECORD_VERSION: u32 = 1;
@@ -88,7 +92,29 @@ mod disk {
     use std::fs;
     use std::path::{Path, PathBuf};
 
-    use super::{DONE_EXT, State};
+    use super::{DONE_EXT, Record, State};
+
+    /// 只认写方提供的凭据,不解释来源或日志内容。无法检查时保守保留,
+    /// 尤其不能把仍活着但长时间等输入的会话当成过期。
+    pub fn session_alive(record: &Record) -> Option<bool> {
+        if record.live_lock.is_empty() {
+            return None;
+        }
+        let file = match fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&record.live_lock)
+        {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Some(false),
+            Err(_) => return None,
+        };
+        match file.try_lock() {
+            Ok(()) => Some(false),
+            Err(fs::TryLockError::WouldBlock) => Some(true),
+            Err(_) => None,
+        }
+    }
 
     /// 用户主目录(Windows 取 `USERPROFILE`)
     pub fn home_dir() -> Option<PathBuf> {
@@ -160,6 +186,112 @@ mod disk {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn live_lock_keeps_wait_and_released_or_missing_lock_ends_session() {
+        let root = std::env::temp_dir().join(format!("pet-state-live-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("owner.lock");
+        let owner = std::fs::File::create(&path).unwrap();
+        owner.lock().unwrap();
+        let record = Record {
+            state: "wait".into(),
+            live_lock: path.display().to_string(),
+            ..Default::default()
+        };
+        assert_eq!(session_alive(&record), Some(true), "等多久都不取代活性凭据");
+        // 并发测试会 fork 子进程,显式解锁不受 fork 到 exec 之间短暂继承句柄的影响。
+        owner.unlock().unwrap();
+        drop(owner);
+        assert_eq!(
+            session_alive(&record),
+            Some(false),
+            "文件还在但锁已释放也算结束"
+        );
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            session_alive(&record),
+            Some(false),
+            "关闭时删掉锁文件也算结束"
+        );
+        assert_eq!(session_alive(&Record::default()), None, "旧档缺凭据不猜");
+        let unreadable = Record {
+            live_lock: root.display().to_string(),
+            ..Default::default()
+        };
+        assert_eq!(session_alive(&unreadable), None, "检查错误不误删会话");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn lock_owner_child() {
+        let Some(path) = std::env::var_os("CCHUD_TEST_OWNER_LOCK") else {
+            return;
+        };
+        let path = std::path::PathBuf::from(path);
+        let owner = std::fs::File::create(&path).unwrap();
+        owner.lock().unwrap();
+        std::fs::write(path.with_extension("ready"), b"").unwrap();
+        loop {
+            std::thread::park();
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn abrupt_owner_exit_releases_the_lease_without_session_end() {
+        use std::process::{Command, Stdio};
+        use std::time::{Duration, Instant};
+
+        struct Owner(std::process::Child);
+        impl Drop for Owner {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let root =
+            std::env::temp_dir().join(format!("pet-state-killed-owner-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let lock = root.join("owner.lock");
+        let mut child = Owner(
+            Command::new(std::env::current_exe().unwrap())
+                .args(["tests::lock_owner_child", "--exact"])
+                .env("CCHUD_TEST_OWNER_LOCK", &lock)
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        );
+        let until = Instant::now() + Duration::from_secs(3);
+        while !lock.with_extension("ready").exists() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            lock.with_extension("ready").exists(),
+            "自己启动的持锁进程就绪"
+        );
+        let record = Record {
+            live_lock: lock.display().to_string(),
+            ..Default::default()
+        };
+        assert_eq!(session_alive(&record), Some(true));
+        child.0.kill().unwrap();
+        child.0.wait().unwrap();
+        assert!(
+            lock.exists(),
+            "故意保留锁文件,验证的是操作系统锁而非路径存在"
+        );
+        assert_eq!(
+            session_alive(&record),
+            Some(false),
+            "没有结束事件也能确认退出"
+        );
+        drop(child);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn names_round_trip() {

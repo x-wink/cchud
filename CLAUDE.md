@@ -51,7 +51,7 @@ node tools/preview.js   # 输出 tools/preview.html
 - **`config.js`** —— 配置优先级为 CLI > 环境变量 > 文件 > `DEFAULTS`。文件依次找 `--config` / `$CCHUD_CONFIG`、脚本旁 `cchud.config.json`、`~/.cchud.json`。新增项加进 `DEFAULTS`，布尔项记得归一。`doneTitle` / `needTitle` 替换 `{name}`。
 - **Hook 适配层** —— Claude 的通知分类、工具名与活跃会话登记只在适配层解释；Codex 把 `PermissionRequest` 归一为 `Notification/wait`、`apply_patch` 为 `edit`，阻断输入工具进入 wait，`Interrupt` 为无完成通知的 idle，轮内 compact 后保持 think。Codex 的身份是 `Codex #短id`，不读 Claude 登记。`PermissionRequest` 可能被别的 Hook 自动放行，因此 wait 是尽力展示；托管网页搜索没有工具 Hook。会话日志不作为 Codex 状态协议。
 - **`crates/pet-hook`** —— `adapter.rs` 提供各客户端的配置路径、事件集合、输入归一与身份；`hook.rs` 只管归一事件与落盘；`setup.rs` 负责共用安装流程。`setup` 默认只装 Claude，`--client codex|all` 显式扩展，备份、幂等、卸载只删自己的条目。Codex 写 `$CODEX_HOME/hooks.json`，安装后用户需 `/hooks` 信任；`SessionEnd` 同步且三秒超时，其余状态钩子异步。
-- **`crates/pet-state`** —— 字段只加不减、缺省可读；`event` 保留现有消费者识别的词汇，`source` / `source_event` / `session_id` / `turn_id` 只供溯源，不改变七态与调用标记契约。
+- **`crates/pet-state`** —— 字段只加不减、缺省可读；`event` 保留现有消费者识别的词汇，`source` / `source_event` / `session_id` / `turn_id` 只供溯源。可选 `live_lock` 由适配层探测，共用 `session_alive` 检查操作系统锁，确认结束才让读方离队；未知保守保留，不改变七态与调用标记契约。边界见 [会话活性说明](docs/roadmaps/session-liveness.md)。
 - **`hud.sh`** —— macOS/Linux 启动器，只是 `exec node hud.js`。Windows 直接调 `node hud.js`（见 README）。
 
 ## 约定

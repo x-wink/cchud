@@ -138,6 +138,8 @@ Codex 新开会话后需要在 **`/hooks` 审查并信任**这些钩子，否则
 
 Codex 的 `PermissionRequest` 表示进入审批流程，其他 Hook 可能自动放行；这时 `wait` 可能短暂出现，后续工具结束事件会解除。同步输入工具 `request_user_input` 会提示需要处理，异步提问不算阻断。托管网页搜索不发工具 Hook，不能保证显示 `web`；经 shell 读文件仍显示 `bash`。`SessionStart` 的 `compact` 来源表示轮内压缩后继续，保持 `think`。子代理结束不算主会话答完。会话身份显示项目名与 `Codex #短id`，不读取 Claude 的会话登记。
 
+直接关闭终端窗口可能来不及运行 `SessionEnd`。适配层在检测到 Codex 写者锁时把可选 `live_lock` 凭据写入状态；支持此字段的桌宠据此移除已经退出的会话，仍在等待输入的活动会话保留。旧写方或无法检查时保守沿用原有规则，详见 [会话活性说明](docs/roadmaps/session-liveness.md)。
+
 如需桌面通知，在 Codex 的 `hooks.json` 已有 `hooks` 下合并下列条目，保留 `setup` 写入的状态钩子。通知仍需 Node：
 
 ```json

@@ -46,6 +46,7 @@ pub fn decide(input: &Event, now_ms: u64) -> Action {
         source_event: input.source_event.clone(),
         session_id: input.session_id.clone(),
         turn_id: input.turn_id.clone(),
+        live_lock: String::new(),
     }))
 }
 
@@ -86,6 +87,16 @@ pub fn run(input: &Event, dir: &Path, now_ms: u64) {
             let _ = pet_state::remove(&path);
         }
         Action::Write(mut record) => {
+            record.live_lock = input.live_lock();
+            // 关闭时迟到的异步事件可能已看不到锁文件,保留此前的凭据让读方识别结束。
+            if record.live_lock.is_empty()
+                && let Ok(bytes) = std::fs::read(&path)
+                && let Ok(previous) = serde_json::from_slice::<Record>(&bytes)
+                && previous.source == record.source
+                && previous.transcript == record.transcript
+            {
+                record.live_lock = previous.live_lock;
+            }
             // 只在要说话时才去翻会话登记目录:钩子每个工具事件都跑,平时不多读盘
             if !record.say.is_empty() {
                 record.title = title(&input.project, &input.session_name());

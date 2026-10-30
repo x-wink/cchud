@@ -4,7 +4,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
-const { normalizeHook, identity, hookClient } = require("../hook-adapter");
+const { normalizeHook, identity, hookClient, liveLock } = require("../hook-adapter");
 const { decide, writeState, titleFor } = require("../hook-state");
 const { notificationFor } = require("../notify");
 const { loadConfig } = require("../config");
@@ -16,6 +16,25 @@ function temporary(t) {
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   return dir;
 }
+
+test("Codex 写者锁由适配层探测，迟到事件保留凭据，旧版无凭据", (t) => {
+  const root = temporary(t);
+  const transcript = path.join(root, "custom-home", "sessions", "2026", "10", "31", "rollout.jsonl");
+  const lock = path.join(root, "custom-home", "thread-writer-locks", "session.lock");
+  const event = normalizeHook({ hook_event_name: "PermissionRequest", session_id: "session", transcript_path: transcript }, "codex");
+  assert.equal(liveLock(event), undefined);
+  fs.mkdirSync(path.dirname(lock), { recursive: true });
+  fs.writeFileSync(lock, "");
+  assert.equal(liveLock(event), lock);
+  const options = { ...cfg, stateDir: path.join(root, "states") };
+  writeState(event, options, 1000);
+  const state = path.join(options.stateDir, "session.json");
+  assert.equal(JSON.parse(fs.readFileSync(state)).live_lock, lock);
+  fs.unlinkSync(lock);
+  writeState(event, options, 1001);
+  assert.equal(JSON.parse(fs.readFileSync(state)).live_lock, lock);
+  assert.equal(liveLock({ ...event, source: "claude" }), undefined);
+});
 
 for (const c of cases) test(c.name, () => {
   const event = normalizeHook(c.input, c.client);

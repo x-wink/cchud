@@ -242,6 +242,29 @@ pub fn notification_state(kind: Option<&str>) -> Option<State> {
 }
 
 impl Event {
+    /// Codex 的写者锁是本机能力探测,不是稳定的日志协议。只在确实存在时携带;
+    /// 老版本或其他客户端不提供凭据,下游无需按来源分支。
+    pub fn live_lock(&self) -> String {
+        if self.client != Client::Codex {
+            return String::new();
+        }
+        let Some(root) = Path::new(&self.transcript)
+            .ancestors()
+            .find(|path| path.file_name().is_some_and(|name| name == "sessions"))
+            .and_then(Path::parent)
+        else {
+            return String::new();
+        };
+        let lock = root
+            .join("thread-writer-locks")
+            .join(format!("{}.lock", self.session_id));
+        if lock.is_file() {
+            lock.to_string_lossy().into_owned()
+        } else {
+            String::new()
+        }
+    }
+
     pub fn session_name(&self) -> String {
         match self.client {
             Client::Codex => format!(
@@ -272,6 +295,34 @@ fn claude_session_name(dir: &Path, sid: &str) -> Option<String> {
 mod tests {
     use super::*;
     use crate::hook::{Action, decide};
+
+    #[test]
+    fn codex_live_lock_is_discovered_from_transcript_root_and_kept_for_late_events() {
+        let root = std::env::temp_dir().join(format!("pet-hook-live-{}", std::process::id()));
+        let transcript = root.join("custom-home/sessions/2026/10/31/rollout.jsonl");
+        let lock = root.join("custom-home/thread-writer-locks/session.lock");
+        std::fs::create_dir_all(lock.parent().unwrap()).unwrap();
+        let input = serde_json::json!({"hook_event_name":"PermissionRequest", "session_id":"session", "transcript_path":transcript});
+        let event = normalize(Client::Codex, &input).unwrap();
+        assert!(event.live_lock().is_empty(), "不为不支持的客户端版本猜路径");
+        std::fs::write(&lock, b"").unwrap();
+        assert_eq!(event.live_lock(), lock.display().to_string());
+        let states = root.join("states");
+        crate::hook::run(&event, &states, 1000);
+        let path = states.join("session.json");
+        let record: pet_state::Record =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(record.live_lock, lock.display().to_string());
+        std::fs::remove_file(lock).unwrap();
+        crate::hook::run(&event, &states, 1001);
+        let late: pet_state::Record =
+            serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+        assert_eq!(
+            late.live_lock, record.live_lock,
+            "锁已删掉的迟到事件仍可判结束"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn shared_fixtures_normalize_both_clients() {
