@@ -47,6 +47,7 @@ pub fn decide(input: &Event, now_ms: u64) -> Action {
         session_id: input.session_id.clone(),
         turn_id: input.turn_id.clone(),
         live_lock: String::new(),
+        live_owners: String::new(),
     }))
 }
 
@@ -87,7 +88,9 @@ pub fn run(input: &Event, dir: &Path, now_ms: u64) {
             let _ = pet_state::remove(&path);
         }
         Action::Write(mut record) => {
-            record.live_lock = input.live_lock();
+            record.live_owners = crate::owner::registry_path(input, dir);
+            record.live_lock =
+                crate::owner::legacy_lock(input, dir).unwrap_or_else(|| input.live_lock());
             // 关闭时迟到的异步事件可能已看不到锁文件,保留此前的凭据让读方识别结束。
             if record.live_lock.is_empty()
                 && let Ok(bytes) = std::fs::read(&path)

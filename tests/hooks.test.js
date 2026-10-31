@@ -190,6 +190,7 @@ test("Rust 与 Node 对同一批夹具落盘一致", { skip: !binary }, (t) => {
     if (c.expected) {
       const record = JSON.parse(fs.readFileSync(file, "utf8"));
       const expected = decide(normalizeHook(c.input, c.client), record.ts);
+      if (c.client === "codex") expected.live_owners = path.join(dir, ".owners", expected.session_id + ".json");
       assert.deepEqual({ ...record, title: "", turn_id: record.turn_id || "" }, { ...expected, turn_id: expected.turn_id || "" }, c.name);
       fs.unlinkSync(file);
     } else assert.equal(fs.existsSync(file), false, c.name);

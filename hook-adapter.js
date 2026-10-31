@@ -167,4 +167,19 @@ function liveLock(event) {
   return undefined;
 }
 
-module.exports = { normalizeHook, hookClient, hookArgs, identity, liveLock, toolState, notificationState, agentInfo, clipName };
+function liveOwners(event, stateDir) {
+  return event.source === "codex" ? path.join(stateDir, ".owners", event.session_id + ".json") : undefined;
+}
+
+function liveOwnerLock(event, stateDir) {
+  const file=liveOwners(event,stateDir);
+  if (!file) return undefined;
+  try {
+    const value=JSON.parse(fs.readFileSync(file,"utf8"));
+    const clients=fs.realpathSync(path.join(stateDir,".clients"));
+    if (value.transcript!==event.transcript || !Array.isArray(value.leases)) return undefined;
+    return value.leases.filter(p=>typeof p==="string" && path.dirname(p)===clients).at(-1);
+  } catch { return undefined; }
+}
+
+module.exports = { normalizeHook, hookClient, hookArgs, identity, liveLock, liveOwners, liveOwnerLock, toolState, notificationState, agentInfo, clipName };

@@ -75,6 +75,9 @@ pub struct Record {
     /// 不提供凭据的旧写方仍按既有过期规则读取。
     #[serde(skip_serializing_if = "String::is_empty")]
     pub live_lock: String,
+    /// 可选登记表 {transcript, leases:[锁路径]}；任一前台仍持锁就保留。
+    #[serde(skip_serializing_if = "String::is_empty")]
+    pub live_owners: String,
 }
 
 pub const RECORD_VERSION: u32 = 1;
@@ -97,14 +100,37 @@ mod disk {
     /// 只认写方提供的凭据,不解释来源或日志内容。无法检查时保守保留,
     /// 尤其不能把仍活着但长时间等输入的会话当成过期。
     pub fn session_alive(record: &Record) -> Option<bool> {
-        if record.live_lock.is_empty() {
+        if !record.live_owners.is_empty() && Path::new(&record.live_owners).exists() {
+            let file = fs::File::open(&record.live_owners).ok()?;
+            if file.metadata().ok()?.len() > 65_536 {
+                return None;
+            }
+            let value: serde_json::Value = serde_json::from_reader(file).ok()?;
+            if value.get("transcript")?.as_str()? != record.transcript {
+                return None;
+            }
+            let paths = value.get("leases")?.as_array()?;
+            if paths.is_empty() || paths.len() > 64 {
+                return None;
+            }
+            let mut unknown = false;
+            for path in paths {
+                match lock_alive(path.as_str()?) {
+                    Some(true) => return Some(true),
+                    None => unknown = true,
+                    Some(false) => {}
+                }
+            }
+            return if unknown { None } else { Some(false) };
+        }
+        lock_alive(&record.live_lock)
+    }
+
+    pub fn lock_alive(path: &str) -> Option<bool> {
+        if path.is_empty() {
             return None;
         }
-        let file = match fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(&record.live_lock)
-        {
+        let file = match fs::OpenOptions::new().read(true).write(true).open(path) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Some(false),
             Err(_) => return None,

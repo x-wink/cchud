@@ -14,6 +14,7 @@ pub struct Options {
     pub settings: Option<PathBuf>,
     pub client: Client,
     pub all: bool,
+    pub frontend_lease: bool,
 }
 
 impl Options {
@@ -24,6 +25,7 @@ impl Options {
             match a.as_str() {
                 "--dry-run" => o.dry_run = true,
                 "--uninstall" => o.uninstall = true,
+                "--frontend-lease" => o.frontend_lease = true,
                 "--client" => {
                     let value = args
                         .next()
@@ -41,6 +43,9 @@ impl Options {
         }
         if o.all && o.settings.is_some() {
             return Err("--client all 不能与 --settings 合用,请分别指定两个客户端".into());
+        }
+        if o.frontend_lease && (o.all || o.client != Client::Codex) {
+            return Err("--frontend-lease 只用于 --client codex".into());
         }
         Ok(o)
     }
@@ -144,11 +149,28 @@ fn strip_ours(list: &mut Vec<Value>, ours: &str) -> usize {
 }
 
 /// 纯函数:在一份 settings 上应用安装 / 卸载,返回改动清单。settings 不是对象就报错,不猜
+#[cfg(test)]
 pub fn apply_for(
     settings: &mut Value,
     ours: &str,
     uninstall: bool,
     client: Client,
+) -> Result<Report, String> {
+    apply_with_lease(settings, ours, uninstall, client, false)
+}
+
+fn owner_hook(hook: &Value) -> bool {
+    hook.get("type").and_then(Value::as_str) == Some("mcp_tool")
+        && hook.get("server").and_then(Value::as_str) == Some(crate::owner::SERVER)
+        && hook.get("tool").and_then(Value::as_str) == Some(crate::owner::TOOL)
+}
+
+fn apply_with_lease(
+    settings: &mut Value,
+    ours: &str,
+    uninstall: bool,
+    client: Client,
+    frontend_lease: bool,
 ) -> Result<Report, String> {
     let root = settings.as_object_mut().ok_or("钩子配置顶层不是对象")?;
     let mut report = Report::default();
@@ -165,6 +187,26 @@ pub fn apply_for(
         let Some(list) = list.as_array_mut() else {
             return Err(format!("hooks.{event} 不是数组"));
         };
+        let owner_wanted = json!({"hooks":[{"type":"mcp_tool","server":crate::owner::SERVER,"tool":crate::owner::TOOL,
+            "input":{"session_id":"${session_id}","transcript":"${transcript_path}"},"timeout":3}]});
+        let had_owner = list.iter().any(|entry| {
+            entry
+                .get("hooks")
+                .and_then(Value::as_array)
+                .is_some_and(|hooks| hooks.iter().any(owner_hook))
+        });
+        let had_exact_owner = list.contains(&owner_wanted);
+        for entry in list.iter_mut() {
+            if let Some(hooks) = entry.get_mut("hooks").and_then(Value::as_array_mut) {
+                hooks.retain(|h| !owner_hook(h));
+            }
+        }
+        list.retain(|entry| {
+            !entry
+                .get("hooks")
+                .and_then(Value::as_array)
+                .is_some_and(Vec::is_empty)
+        });
         // 算「没动」要整条一模一样:指向本程序但同步跑、带了 matcher 的旧条目也得重写,
         // 同步钩子会卡住会话
         let wanted = entry(ours, client, event);
@@ -184,6 +226,29 @@ pub fn apply_for(
         }
         if list.is_empty() {
             hooks.remove(event);
+        }
+        if client == Client::Codex && event == "SessionStart" && (frontend_lease || had_owner) {
+            if uninstall {
+                if had_owner && !report.removed.iter().any(|e| e == event) {
+                    report.removed.push(event.into());
+                }
+            } else {
+                hooks
+                    .entry(event)
+                    .or_insert_with(|| json!([]))
+                    .as_array_mut()
+                    .ok_or("SessionStart不是数组")?
+                    .push(owner_wanted);
+                if !had_exact_owner
+                    && !report
+                        .added
+                        .iter()
+                        .chain(&report.replaced)
+                        .any(|e| e == event)
+                {
+                    report.replaced.push(event.into());
+                }
+            }
         }
     }
     if hooks.is_empty() {
@@ -213,7 +278,13 @@ pub fn run(opts: &Options, exe: &Path) -> Result<Report, String> {
             .map_err(|e| format!("{} 不是合法 JSON:{e}", path.display()))?
     };
     let ours = client_command(exe, opts.client);
-    let report = apply_for(&mut settings, &ours, opts.uninstall, opts.client)?;
+    let report = apply_with_lease(
+        &mut settings,
+        &ours,
+        opts.uninstall,
+        opts.client,
+        opts.frontend_lease,
+    )?;
     if opts.dry_run || report.is_noop() {
         return Ok(report);
     }
@@ -284,6 +355,34 @@ pub fn describe(report: &Report, opts: &Options, exe: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn frontend_lease_hook_is_stable_optional_and_removed_without_touching_neighbors() {
+        let ours = "/trusted/pet-hook --client codex";
+        let original = json!({"hooks":{"SessionStart":[{"hooks":[{"type":"command","command":"user-hook"}]}]}});
+        let mut settings = original.clone();
+        apply_with_lease(&mut settings, ours, false, Client::Codex, true).unwrap();
+        assert_eq!(
+            settings["hooks"]["SessionStart"].as_array().unwrap().len(),
+            3
+        );
+        let installed = settings.clone();
+        assert!(
+            apply_with_lease(&mut settings, ours, false, Client::Codex, true)
+                .unwrap()
+                .is_noop()
+        );
+        assert_eq!(settings, installed);
+        assert!(
+            apply_for(&mut settings, ours, false, Client::Codex)
+                .unwrap()
+                .is_noop()
+        );
+        assert_eq!(settings, installed);
+        apply_with_lease(&mut settings, ours, true, Client::Codex, true).unwrap();
+        assert_eq!(settings, original);
+        assert!(Options::parse(["--frontend-lease".to_string()]).is_err());
+    }
 
     const EXE: &str = "/usr/local/bin/pet-hook";
 

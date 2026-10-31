@@ -125,7 +125,7 @@ pub struct Event {
     pub transcript: String,
     pub message: String,
     pub project: String,
-    client: Client,
+    pub(crate) client: Client,
 }
 
 fn text<'a>(v: &'a Value, key: &str) -> &'a str {

@@ -1,6 +1,6 @@
 const fs = require("fs");
 const path = require("path");
-const { identity, clipName, liveLock } = require("./hook-adapter");
+const { identity, clipName, liveLock, liveOwners, liveOwnerLock } = require("./hook-adapter");
 
 function titleFor(project, session) {
   const derived = project && (session === project || session.startsWith(project + "-"));
@@ -55,14 +55,18 @@ function writeState(event, cfg, now = Date.now()) {
       try { fs.unlinkSync(file); } catch {}
       return;
     }
-    let lock = liveLock(event);
+    let lock = liveOwnerLock(event,dir) || liveLock(event);
     if (!lock) {
       try {
         const previous = JSON.parse(fs.readFileSync(file, "utf8"));
-        if (previous.source === record.source && previous.transcript === record.transcript) lock = previous.live_lock;
+        if (previous.source === record.source && previous.transcript === record.transcript) {
+          lock = previous.live_lock;
+        }
       } catch {}
     }
     if (lock) record.live_lock = lock;
+    const owners = liveOwners(event, dir);
+    if (owners) record.live_owners = owners;
     if (record.say) record.title = titleFor(event.project, identity(event, cfg).name);
     fs.mkdirSync(dir, { recursive: true });
     const tmp = file + "." + process.pid + ".tmp";
