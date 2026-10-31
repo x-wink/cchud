@@ -100,7 +100,14 @@ mod disk {
     /// 只认写方提供的凭据,不解释来源或日志内容。无法检查时保守保留,
     /// 尤其不能把仍活着但长时间等输入的会话当成过期。
     pub fn session_alive(record: &Record) -> Option<bool> {
-        if !record.live_owners.is_empty() && Path::new(&record.live_owners).exists() {
+        if !record.live_owners.is_empty() {
+            match fs::metadata(&record.live_owners) {
+                Ok(_) => {}
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    return lock_alive(&record.live_lock);
+                }
+                Err(_) => return None,
+            }
             let file = fs::File::open(&record.live_owners).ok()?;
             if file.metadata().ok()?.len() > 65_536 {
                 return None;
@@ -212,6 +219,34 @@ mod disk {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn invalid_owner_table_is_unknown_instead_of_falling_back_to_a_dead_lock() {
+        let root =
+            std::env::temp_dir().join(format!("pet-owner-table-errors-{}", std::process::id()));
+        std::fs::create_dir_all(&root).unwrap();
+        let dead = root.join("released.lock");
+        std::fs::write(&dead, "").unwrap();
+        let table = root.join("owners.json");
+        let mut record = Record {
+            live_lock: dead.display().to_string(),
+            live_owners: table.display().to_string(),
+            transcript: "expected".into(),
+            ..Default::default()
+        };
+        assert_eq!(session_alive(&record), Some(false), "未登记时兼容旧锁");
+        std::fs::write(&table, "broken").unwrap();
+        assert_eq!(session_alive(&record), None);
+        std::fs::write(&table, r#"{"transcript":"other","leases":[]}"#).unwrap();
+        assert_eq!(session_alive(&record), None);
+        #[cfg(unix)]
+        {
+            record.live_owners = dead.join("cannot-be-a-child.json").display().to_string();
+            assert_eq!(session_alive(&record), None, "检查错误不能当作前台退出");
+        }
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
